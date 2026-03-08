@@ -173,6 +173,8 @@ class Orchestrator:
                 return
 
             attempt = NodeAttempt(number=attempt_number, status=NodeStatus.RUNNING, started_at=utcnow_iso())
+            attempt_stdout_lines: list[str] = []
+            attempt_stderr_lines: list[str] = []
             result.current_attempt = attempt_number
             result.attempts.append(attempt)
             parser.start_attempt(attempt_number)
@@ -209,13 +211,13 @@ class Orchestrator:
 
             async def on_output(stream_name: str, line: str) -> None:
                 if stream_name == "stdout":
-                    result.stdout_lines.append(line)
+                    attempt_stdout_lines.append(line)
                     await self.store.append_artifact_text(run_id, node_id, "stdout.log", line + "\n")
                     for event in parser.feed(line):
                         result.trace_events.append(event)
                         await self._publish_trace(run_id, node_id, event)
                 else:
-                    result.stderr_lines.append(line)
+                    attempt_stderr_lines.append(line)
                     await self.store.append_artifact_text(run_id, node_id, "stderr.log", line + "\n")
                     event = parser.emit("stderr", "stderr", line, line, source="stderr")
                     result.trace_events.append(event)
@@ -223,8 +225,10 @@ class Orchestrator:
 
             raw = await runner.execute(node, prepared, paths, on_output, lambda: self._should_cancel(run_id))
             result.exit_code = raw.exit_code
-            result.final_response = parser.finalize() or "\n".join(result.stdout_lines).strip()
-            result.output = result.final_response if node.capture.value == "final" else "\n".join(result.stdout_lines)
+            result.stdout_lines = attempt_stdout_lines
+            result.stderr_lines = attempt_stderr_lines
+            result.final_response = parser.finalize() or "\n".join(attempt_stdout_lines).strip()
+            result.output = result.final_response if node.capture.value == "final" else "\n".join(attempt_stdout_lines)
             success_ok, success_details = evaluate_success(node, result, paths.host_workdir)
             result.success = success_ok
             result.success_details = success_details
