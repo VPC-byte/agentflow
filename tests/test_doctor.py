@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from agentflow.doctor import build_local_smoke_doctor_report
+from agentflow.doctor import build_bash_login_shell_bridge_recommendation, build_local_smoke_doctor_report
 
 
 def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkeypatch):
@@ -622,3 +622,69 @@ def test_local_smoke_doctor_report_redacts_sensitive_unknown_codex_stderr(tmp_pa
         "status": "failed",
         "detail": "`codex` is not on PATH, and `bash -lic` failed while looking for it: OPENAI_API_KEY=<redacted>",
     }
+
+
+def test_shell_bridge_recommendation_targets_profile_when_no_login_file_exists(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+
+    recommendation = build_bash_login_shell_bridge_recommendation(home=home)
+
+    assert recommendation is not None
+    assert recommendation.as_dict() == {
+        "target": "~/.profile",
+        "source": "~/.bashrc",
+        "snippet": 'if [ -f "$HOME/.bashrc" ]; then\n  . "$HOME/.bashrc"\nfi\n',
+        "reason": (
+            "No `~/.bash_profile`, `~/.bash_login`, or `~/.profile` was found for bash login shells, "
+            "so create a minimal startup file that reaches `~/.bashrc`."
+        ),
+    }
+
+
+def test_shell_bridge_recommendation_targets_active_login_file_when_bridge_is_missing(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".bash_profile").write_text('export PATH="$HOME/bin:$PATH"\n', encoding="utf-8")
+
+    recommendation = build_bash_login_shell_bridge_recommendation(home=home)
+
+    assert recommendation is not None
+    assert recommendation.as_dict() == {
+        "target": "~/.bash_profile",
+        "source": "~/.bashrc",
+        "snippet": 'if [ -f "$HOME/.bashrc" ]; then\n  . "$HOME/.bashrc"\nfi\n',
+        "reason": "Bash login shells use `~/.bash_profile`, but it does not reference `~/.bashrc`.",
+    }
+
+
+def test_shell_bridge_recommendation_reuses_shadowed_profile_bridge(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".bash_profile").write_text('export PATH="$HOME/bin:$PATH"\n', encoding="utf-8")
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    recommendation = build_bash_login_shell_bridge_recommendation(home=home)
+
+    assert recommendation is not None
+    assert recommendation.as_dict() == {
+        "target": "~/.bash_profile",
+        "source": "~/.profile",
+        "snippet": 'if [ -f "$HOME/.profile" ]; then\n  . "$HOME/.profile"\nfi\n',
+        "reason": (
+            "Bash login shells use `~/.bash_profile`, so `~/.profile` will never run even though it references "
+            "`~/.bashrc`; add the same bridge to the active login file."
+        ),
+    }
+
+
+def test_shell_bridge_recommendation_is_none_when_login_chain_already_reaches_bashrc(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    recommendation = build_bash_login_shell_bridge_recommendation(home=home)
+
+    assert recommendation is None

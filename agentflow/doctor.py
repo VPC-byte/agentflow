@@ -130,6 +130,17 @@ class DoctorReport:
         }
 
 
+@dataclass(frozen=True)
+class ShellBridgeRecommendation:
+    target: str
+    source: str
+    snippet: str
+    reason: str
+
+    def as_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+
 def _check_executable(name: str) -> DoctorCheck:
     path = shutil.which(name)
     if path:
@@ -254,6 +265,10 @@ def _format_bash_startup_paths(paths: tuple[str, ...]) -> str:
     return f"{', '.join(formatted[:-1])}, and {formatted[-1]}"
 
 
+def _render_shell_source_snippet(filename: str) -> str:
+    return f'if [ -f "$HOME/{filename}" ]; then\n  . "$HOME/{filename}"\nfi\n'
+
+
 def _bash_login_file_clause(home: Path, login_file: Path) -> str:
     if login_file.name != ".profile":
         return f"Bash login shells use `~/{login_file.name}`"
@@ -331,6 +346,48 @@ def _check_bash_login_startup(home: Path) -> DoctorCheck:
             f"{login_file_clause}, and it reaches `~/.bashrc` "
             f"via {_format_bash_startup_paths(chain[1:-1])}."
         ),
+    )
+
+
+def build_bash_login_shell_bridge_recommendation(home: Path | None = None) -> ShellBridgeRecommendation | None:
+    resolved_home = home or Path.home()
+    login_file = _bash_login_file(resolved_home)
+    if login_file is None:
+        return ShellBridgeRecommendation(
+            target="~/.profile",
+            source="~/.bashrc",
+            snippet=_render_shell_source_snippet(".bashrc"),
+            reason=(
+                "No `~/.bash_profile`, `~/.bash_login`, or `~/.profile` was found for bash login shells, "
+                "so create a minimal startup file that reaches `~/.bashrc`."
+            ),
+        )
+
+    chain = _bash_startup_chain_to_bashrc(resolved_home, login_file)
+    if chain is not None:
+        return None
+
+    login_file_clause = _bash_login_file_clause(resolved_home, login_file)
+    shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(resolved_home, login_file.name)
+    if shadowed_chain is not None:
+        shadowed_paths = _format_bash_startup_paths(shadowed_chain[:-1])
+        pronoun = "it" if len(shadowed_chain) == 2 else "they"
+        bridge_detail = "references" if len(shadowed_chain) == 2 else "reach"
+        return ShellBridgeRecommendation(
+            target=f"~/{login_file.name}",
+            source=f"~/{shadowed_chain[0]}",
+            snippet=_render_shell_source_snippet(shadowed_chain[0]),
+            reason=(
+                f"{login_file_clause}, so {shadowed_paths} will never run even though {pronoun} {bridge_detail} "
+                "`~/.bashrc`; add the same bridge to the active login file."
+            ),
+        )
+
+    return ShellBridgeRecommendation(
+        target=f"~/{login_file.name}",
+        source="~/.bashrc",
+        snippet=_render_shell_source_snippet(".bashrc"),
+        reason=f"{login_file_clause}, but it does not reference `~/.bashrc`.",
     )
 
 
