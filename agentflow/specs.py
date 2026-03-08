@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from enum import StrEnum
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class AgentKind(StrEnum):
+    CODEX = "codex"
+    CLAUDE = "claude"
+    KIMI = "kimi"
+
+
+class ToolAccess(StrEnum):
+    READ_ONLY = "read_only"
+    READ_WRITE = "read_write"
+
+
+class CaptureMode(StrEnum):
+    FINAL = "final"
+    TRACE = "trace"
+
+
+class NodeStatus(StrEnum):
+    PENDING = "pending"
+    READY = "ready"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class RunStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ProviderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = "default"
+    base_url: str | None = None
+    api_key_env: str | None = None
+    wire_api: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class MCPServerSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    transport: Literal["stdio", "streamable_http"] = "stdio"
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+class LocalTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["local"] = "local"
+    cwd: str | None = None
+    shell: str | None = None
+
+
+class ContainerTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["container"] = "container"
+    image: str
+    engine: str = "docker"
+    workdir_mount: str = "/workspace"
+    runtime_mount: str = "/agentflow-runtime"
+    app_mount: str = "/agentflow-app"
+    extra_args: list[str] = Field(default_factory=list)
+    entrypoint: str | None = None
+
+
+class AwsLambdaTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["aws_lambda"] = "aws_lambda"
+    function_name: str
+    region: str | None = None
+    remote_workdir: str = "/tmp/workspace"
+    qualifier: str | None = None
+    invocation_type: Literal["RequestResponse", "Event"] = "RequestResponse"
+
+
+TargetSpec = Annotated[LocalTarget | ContainerTarget | AwsLambdaTarget, Field(discriminator="kind")]
+
+
+class OutputContainsCriterion(BaseModel):
+    kind: Literal["output_contains"] = "output_contains"
+    value: str
+    case_sensitive: bool = False
+
+
+class FileExistsCriterion(BaseModel):
+    kind: Literal["file_exists"] = "file_exists"
+    path: str
+
+
+class FileContainsCriterion(BaseModel):
+    kind: Literal["file_contains"] = "file_contains"
+    path: str
+    value: str
+    case_sensitive: bool = False
+
+
+class FileNonEmptyCriterion(BaseModel):
+    kind: Literal["file_nonempty"] = "file_nonempty"
+    path: str
+
+
+SuccessCriterion = Annotated[
+    OutputContainsCriterion | FileExistsCriterion | FileContainsCriterion | FileNonEmptyCriterion,
+    Field(discriminator="kind"),
+]
+
+
+class NodeSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    agent: AgentKind
+    prompt: str
+    depends_on: list[str] = Field(default_factory=list)
+    model: str | None = None
+    provider: str | ProviderConfig | None = None
+    tools: ToolAccess = ToolAccess.READ_ONLY
+    mcps: list[MCPServerSpec] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list)
+    target: TargetSpec = Field(default_factory=LocalTarget)
+    capture: CaptureMode = CaptureMode.FINAL
+    output_key: str | None = None
+    timeout_seconds: int = 1800
+    env: dict[str, str] = Field(default_factory=dict)
+    executable: str | None = None
+    extra_args: list[str] = Field(default_factory=list)
+    description: str | None = None
+    success_criteria: list[SuccessCriterion] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ensure_unique_dependencies(self) -> "NodeSpec":
+        self.depends_on = list(dict.fromkeys(self.depends_on))
+        return self
+
+
+class PipelineSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    working_dir: str = "."
+    concurrency: int = 4
+    nodes: list[NodeSpec]
+
+    @model_validator(mode="after")
+    def validate_nodes(self) -> "PipelineSpec":
+        ids = [node.id for node in self.nodes]
+        duplicates = {node_id for node_id in ids if ids.count(node_id) > 1}
+        if duplicates:
+            raise ValueError(f"duplicate node ids: {sorted(duplicates)}")
+        missing = {
+            dependency
+            for node in self.nodes
+            for dependency in node.depends_on
+            if dependency not in ids
+        }
+        if missing:
+            raise ValueError(f"unknown dependencies: {sorted(missing)}")
+        return self
+
+    @property
+    def node_map(self) -> dict[str, NodeSpec]:
+        return {node.id: node for node in self.nodes}
+
+    @property
+    def working_path(self) -> Path:
+        return Path(self.working_dir).resolve()
+
+
+class NormalizedTraceEvent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    node_id: str
+    agent: AgentKind
+    source: Literal["stdout", "stderr", "system"] = "stdout"
+    kind: str
+    title: str
+    content: str | None = None
+    raw: Any | None = None
+
+
+class NodeResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: str
+    status: NodeStatus = NodeStatus.PENDING
+    started_at: str | None = None
+    finished_at: str | None = None
+    exit_code: int | None = None
+    final_response: str | None = None
+    output: str | None = None
+    stdout_lines: list[str] = Field(default_factory=list)
+    stderr_lines: list[str] = Field(default_factory=list)
+    trace_events: list[NormalizedTraceEvent] = Field(default_factory=list)
+    success: bool | None = None
+    success_details: list[str] = Field(default_factory=list)
+
+
+class RunRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: RunStatus = RunStatus.PENDING
+    pipeline: PipelineSpec
+    started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    finished_at: str | None = None
+    nodes: dict[str, NodeResult] = Field(default_factory=dict)
+
+
+class RunEvent(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    run_id: str
+    type: str
+    node_id: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)

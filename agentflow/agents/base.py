@@ -1,0 +1,35 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any
+
+from agentflow.prepared import ExecutionPaths, PreparedExecution
+from agentflow.specs import NodeSpec, ProviderConfig
+
+
+class AgentAdapter(ABC):
+    @abstractmethod
+    def prepare(self, node: NodeSpec, prompt: str, paths: ExecutionPaths) -> PreparedExecution:
+        raise NotImplementedError
+
+    def provider_config(self, value: str | ProviderConfig | None) -> ProviderConfig | None:
+        if value is None:
+            return None
+        if isinstance(value, ProviderConfig):
+            return value
+        return ProviderConfig(name=value)
+
+    def merge_env(self, *parts: dict[str, str]) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        for part in parts:
+            merged.update({key: value for key, value in part.items() if value is not None})
+        return merged
+
+    def quote_json(self, value: Any) -> str:
+        import json
+
+        return json.dumps(value, ensure_ascii=False)
+
+    def relative_runtime_file(self, *parts: str) -> str:
+        return str(Path(*parts))

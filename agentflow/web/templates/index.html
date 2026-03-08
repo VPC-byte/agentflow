@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AgentFlow</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header>
+      <h1>AgentFlow</h1>
+      <p>Parallel and DAG orchestration for Codex, Claude, and Kimi.</p>
+    </header>
+    <main class="layout">
+      <section class="panel editor">
+        <div class="panel-header">
+          <h2>Pipeline</h2>
+          <div class="button-row">
+            <button id="load-example">Load example</button>
+            <button id="run-pipeline" class="primary">Run pipeline</button>
+          </div>
+        </div>
+        <textarea id="pipeline-input">{{ example }}</textarea>
+      </section>
+      <section class="panel graph-panel">
+        <div class="panel-header">
+          <h2>DAG</h2>
+          <span id="run-status">Idle</span>
+        </div>
+        <div id="graph"></div>
+      </section>
+      <section class="panel runs-panel">
+        <div class="panel-header">
+          <h2>Runs</h2>
+          <button id="refresh-runs">Refresh</button>
+        </div>
+        <div id="runs"></div>
+      </section>
+      <section class="panel detail-panel">
+        <div class="panel-header">
+          <h2>Node detail</h2>
+          <span id="selected-node">None</span>
+        </div>
+        <div id="detail"></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

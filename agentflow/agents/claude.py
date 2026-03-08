@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from agentflow.agents.base import AgentAdapter
+from agentflow.prepared import ExecutionPaths, PreparedExecution
+from agentflow.specs import NodeSpec, ToolAccess
+
+
+_CLAUDE_READ_ONLY_TOOLS = [
+    "Read",
+    "Glob",
+    "Grep",
+    "LS",
+    "NotebookRead",
+    "Task",
+    "TaskOutput",
+    "TodoRead",
+    "WebFetch",
+    "WebSearch",
+]
+
+_CLAUDE_READ_WRITE_TOOLS = _CLAUDE_READ_ONLY_TOOLS + [
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "TodoWrite",
+    "Bash",
+]
+
+
+class ClaudeAdapter(AgentAdapter):
+    def prepare(self, node: NodeSpec, prompt: str, paths: ExecutionPaths) -> PreparedExecution:
+        provider = self.provider_config(node.provider)
+        executable = node.executable or "claude"
+        command = [
+            executable,
+            "-p",
+            prompt,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--permission-mode",
+            "bypassPermissions",
+        ]
+        if node.model:
+            command.extend(["--model", node.model])
+        allowed_tools = _CLAUDE_READ_ONLY_TOOLS if node.tools == ToolAccess.READ_ONLY else _CLAUDE_READ_WRITE_TOOLS
+        command.extend(["--allowedTools", ",".join(allowed_tools)])
+        runtime_files: dict[str, str] = {}
+        if node.mcps:
+            mcp_payload: dict[str, object] = {"mcpServers": {}}
+            for mcp in node.mcps:
+                inner: dict[str, object] = {}
+                if mcp.transport == "stdio":
+                    if mcp.command:
+                        inner["command"] = mcp.command
+                    if mcp.args:
+                        inner["args"] = mcp.args
+                    if mcp.env:
+                        inner["env"] = mcp.env
+                else:
+                    if mcp.url:
+                        inner["url"] = mcp.url
+                    if mcp.headers:
+                        inner["headers"] = mcp.headers
+                    inner["transport"] = "streamable_http"
+                mcp_payload["mcpServers"][mcp.name] = inner
+            relative_path = self.relative_runtime_file("claude-mcp.json")
+            runtime_files[relative_path] = json.dumps(mcp_payload, ensure_ascii=False, indent=2)
+            command.extend(["--mcp-config", str(Path(paths.target_runtime_dir) / relative_path)])
+        env = dict(node.env)
+        if provider:
+            env.update(provider.env)
+            if provider.base_url:
+                env.setdefault("ANTHROPIC_BASE_URL", provider.base_url)
+            if provider.api_key_env:
+                env.setdefault("ANTHROPIC_API_KEY_ENV", provider.api_key_env)
+        command.extend(node.extra_args)
+        return PreparedExecution(
+            command=command,
+            env=env,
+            cwd=paths.target_workdir,
+            trace_kind="claude",
+            runtime_files=runtime_files,
+        )
