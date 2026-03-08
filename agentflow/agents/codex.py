@@ -74,6 +74,8 @@ class CodexAdapter(AgentAdapter):
             "--skip-git-repo-check",
             "-c",
             'approval_policy="never"',
+            "-c",
+            "suppress_unstable_features_warning=true",
             "--sandbox",
             sandbox,
         ]

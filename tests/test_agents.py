@@ -57,7 +57,14 @@ def test_codex_adapter_uses_current_exec_flags(tmp_path):
 
     assert prepared.command[:4] == ["codex", "exec", "--json", "--skip-git-repo-check"]
     assert "--ask-for-approval" not in prepared.command
-    assert prepared.command[4:8] == ["-c", 'approval_policy="never"', "--sandbox", "read-only"]
+    assert prepared.command[4:10] == [
+        "-c",
+        'approval_policy="never"',
+        "-c",
+        "suppress_unstable_features_warning=true",
+        "--sandbox",
+        "read-only",
+    ]
 
 
 def test_codex_adapter_suppresses_unstable_feature_warning(tmp_path):
