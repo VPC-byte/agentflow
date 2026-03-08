@@ -40,6 +40,7 @@ _BASHRC_NONINTERACTIVE_GUARDS = (
     re.compile(r"\[\[\s*\$-\s*!=\s*\*i\*\s*\]\]\s*&&\s*return"),
     re.compile(r"\[\s*-z\s+['\"]?\$PS1['\"]?\s*\]\s*&&\s*return"),
 )
+_EXPORT_STYLE_COMMANDS = {"declare", "typeset"}
 
 
 def _target_value(target: Any, key: str) -> Any:
@@ -110,6 +111,74 @@ def _looks_like_bashrc_path(token: str) -> bool:
     if stripped in {"~/.bashrc", "$HOME/.bashrc", "${HOME}/.bashrc"}:
         return True
     return os.path.basename(stripped) == ".bashrc"
+
+
+def _env_assignment_name(token: str) -> str | None:
+    normalized = _normalize_shell_token(token)
+    if not _looks_like_env_assignment(normalized):
+        return None
+    return normalized.split("=", 1)[0]
+
+
+def _shell_command_exports_env_var_before_target(command: str | None, env_var: str, target: str) -> bool:
+    if not isinstance(command, str) or not command.strip() or not env_var or not target:
+        return False
+
+    tokens = _split_shell_parts(command)
+    expects_command = True
+    prefix_allows_options = False
+    active_command: str | None = None
+    declare_exports = False
+    exported = False
+
+    for index, token in enumerate(tokens):
+        if index > 0 and _is_command_flag(tokens[index - 1]):
+            if _shell_command_exports_env_var_before_target(token, env_var, target):
+                return True
+
+        normalized = _normalize_shell_token(token)
+        if _token_resets_command_position(token):
+            expects_command = True
+            prefix_allows_options = False
+            active_command = None
+            declare_exports = False
+            continue
+
+        if expects_command and normalized == target:
+            return exported
+
+        if expects_command:
+            if token in _COMMAND_POSITION_PREFIX_TOKENS:
+                prefix_allows_options = True
+                continue
+            if _looks_like_env_assignment(token):
+                continue
+            if prefix_allows_options and (token == "--" or token.startswith("-")):
+                continue
+            expects_command = False
+            prefix_allows_options = False
+            active_command = os.path.basename(token)
+            declare_exports = False
+            if normalized == target:
+                return exported
+            continue
+
+        if active_command == "export":
+            if normalized == "--" or normalized.startswith("-"):
+                continue
+            if _env_assignment_name(token) == env_var:
+                exported = True
+            continue
+
+        if active_command in _EXPORT_STYLE_COMMANDS:
+            if normalized.startswith("-"):
+                if "x" in normalized.lstrip("-"):
+                    declare_exports = True
+                continue
+            if declare_exports and _env_assignment_name(token) == env_var:
+                exported = True
+
+    return False
 
 
 def _shell_command_sources_bashrc_before_target(command: str | None, target: str) -> bool:
@@ -201,6 +270,21 @@ def shell_init_sources_bashrc_before_kimi(shell_init: Any) -> bool:
         if shell_command_sources_bashrc(command):
             sourced_bashrc = True
     return False
+
+
+def shell_init_exports_env_var(shell_init: Any, env_var: str) -> bool:
+    rendered = render_shell_init(shell_init)
+    if not rendered:
+        return False
+    placeholder = "__AGENTFLOW_ENV_EXPORT_TARGET__"
+    return _shell_command_exports_env_var_before_target(f"{rendered} && {placeholder}", env_var, placeholder)
+
+
+def shell_template_exports_env_var_before_command(shell: str | None, env_var: str) -> bool:
+    if not isinstance(shell, str) or "{command}" not in shell:
+        return False
+    placeholder = "__AGENTFLOW_ENV_EXPORT_TARGET__"
+    return _shell_command_exports_env_var_before_target(shell.replace("{command}", placeholder), env_var, placeholder)
 
 
 def _explicit_bashrc_kimi_warning(subject: str) -> str:

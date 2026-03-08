@@ -13,7 +13,13 @@ import typer
 from pydantic import ValidationError
 from agentflow.defaults import default_smoke_pipeline_path
 from agentflow.doctor import DoctorCheck, build_bash_login_shell_bridge_recommendation, build_local_smoke_doctor_report
-from agentflow.local_shell import kimi_shell_init_requires_interactive_bash_warning, shell_command_uses_kimi_helper, shell_init_uses_kimi_helper
+from agentflow.local_shell import (
+    kimi_shell_init_requires_interactive_bash_warning,
+    shell_command_uses_kimi_helper,
+    shell_init_exports_env_var,
+    shell_init_uses_kimi_helper,
+    shell_template_exports_env_var_before_command,
+)
 from agentflow.specs import AgentKind, resolve_provider
 
 app = typer.Typer(add_completion=False)
@@ -447,15 +453,25 @@ def _resolved_provider_api_key_env(node: object) -> tuple[str | None, str | None
     return None, None
 
 
-def _provider_credentials_come_from_kimi_bootstrap(
+def _provider_credentials_come_from_local_bootstrap(
     node: object,
     *,
     api_key_env: str,
     provider_name: str | None,
 ) -> bool:
-    if api_key_env != "ANTHROPIC_API_KEY" or provider_name != "kimi":
-        return False
-    return _node_uses_kimi_smoke_bootstrap(node)
+    target = getattr(node, "target", None)
+    if getattr(target, "kind", None) == "local":
+        shell_init = getattr(target, "shell_init", None)
+        if shell_init_exports_env_var(shell_init, api_key_env):
+            return True
+
+        shell = getattr(target, "shell", None)
+        if shell_template_exports_env_var_before_command(shell if isinstance(shell, str) else None, api_key_env):
+            return True
+
+    if api_key_env == "ANTHROPIC_API_KEY" and provider_name == "kimi":
+        return _node_uses_kimi_smoke_bootstrap(node)
+    return False
 
 
 def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
@@ -473,7 +489,7 @@ def _pipeline_provider_credential_checks(pipeline: object) -> list[DoctorCheck]:
             isinstance(source, dict) and str(source.get(api_key_env, "")).strip()
             for source in (node_env, provider_env)
         ) or bool(str(os.getenv(api_key_env, "")).strip())
-        if not has_key and _provider_credentials_come_from_kimi_bootstrap(
+        if not has_key and _provider_credentials_come_from_local_bootstrap(
             node,
             api_key_env=api_key_env,
             provider_name=provider_name,
