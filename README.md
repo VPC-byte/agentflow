@@ -50,7 +50,7 @@ agentflow inspect examples/pipeline.yaml --node review --output json
 ```
 
 The default summary view now includes resolved per-node model, tools, capture, skills, MCP server names, and provider details when they are set, which makes it easier to verify mixed Codex, Claude, and Kimi launch configs before you execute a run.
-For local nodes, it also surfaces shell bootstrap details such as `shell`, login and interactive flags, and `shell_init`, so Kimi-backed wrappers are easier to confirm without decoding the full launch command.
+For local nodes, it also surfaces shell bootstrap details such as `shell`, login and interactive flags, and `shell_init`, so Kimi-backed wrappers are easier to confirm without decoding the full launch command. Inline secret assignments in `shell_init` or shell wrappers are redacted in both `inspect` output and persisted `launch.json` artifacts.
 It also shows whether `agentflow run` or `agentflow smoke` will trigger the local doctor preflight automatically in the default `auto` mode, which helps you confirm bundled-smoke and Kimi-bootstrap detection before you launch anything.
 When that auto preflight is enabled because of a local Kimi bootstrap, the inspect output now also names the matching nodes and whether the trigger came from `target.shell_init` or `target.shell`, so it is easier to trust why the guard rail will run.
 Use `--output json-summary` when you want the same compact information in a machine-readable format without the full prepared env and payload details from `--output json`.
@@ -268,7 +268,7 @@ The frontend shows:
 - controls to validate, launch, cancel, and rerun pipelines
 
 Artifact files are persisted under `AGENTFLOW_RUNS_DIR/<run_id>/artifacts/<node_id>/`.
-Each node now includes a redacted `launch.json` artifact that records the resolved command, working directory, selected runtime files, and any remote-runner payload metadata without storing secret env values or runtime file contents.
+Each node now includes a redacted `launch.json` artifact that records the resolved command, working directory, selected runtime files, and any remote-runner payload metadata without storing secret env values, inline shell bootstrap assignments, or runtime file contents.
 
 ## API surface
 
