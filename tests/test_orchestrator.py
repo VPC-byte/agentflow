@@ -350,3 +350,39 @@ async def test_orchestrator_writes_redacted_launch_artifact(tmp_path: Path):
         "runtime_files": ["config/runtime.env"],
         "payload": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_redacts_inline_shell_bootstrap_secrets_in_launch_artifact(tmp_path: Path):
+    adapters = AdapterRegistry()
+    adapters.register(AgentKind.CODEX, LaunchPlanAdapter())
+    orchestrator = Orchestrator(store=RunStore(tmp_path / "runs"), adapters=adapters, runners=RunnerRegistry())
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "launch-artifact-shell-secret",
+            "working_dir": str(tmp_path),
+            "nodes": [
+                {
+                    "id": "alpha",
+                    "agent": "codex",
+                    "prompt": "launch",
+                    "target": {
+                        "kind": "local",
+                        "shell": "bash",
+                        "shell_init": ["export ANTHROPIC_API_KEY=super-secret-inline"],
+                    },
+                }
+            ],
+        }
+    )
+
+    run = await orchestrator.submit(pipeline)
+    completed = await orchestrator.wait(run.id, timeout=5)
+
+    assert completed.status.value == "completed"
+    launch_artifact = json.loads(orchestrator.store.read_artifact_text(completed.id, "alpha", "launch.json"))
+    assert launch_artifact["command"] == [
+        "bash",
+        "-c",
+        'export ANTHROPIC_API_KEY=<redacted> && eval "$AGENTFLOW_TARGET_COMMAND"',
+    ]

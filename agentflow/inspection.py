@@ -10,7 +10,7 @@ from agentflow.context import render_node_prompt
 from agentflow.prepared import build_execution_paths
 from agentflow.runners.registry import RunnerRegistry, default_runner_registry
 from agentflow.specs import NodeResult, NodeSpec, NodeStatus, PipelineSpec, resolve_provider
-from agentflow.utils import looks_sensitive_key
+from agentflow.utils import looks_sensitive_key, redact_sensitive_shell_text, redact_sensitive_shell_value
 
 _REDACTED = "<redacted>"
 _GENERATED = "<generated>"
@@ -95,6 +95,14 @@ def _sanitize_payload(value: Any, *, key: str | None = None) -> Any:
     return value
 
 
+def _sanitize_target(target: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(target)
+    for key in ("shell", "shell_init"):
+        if key in sanitized:
+            sanitized[key] = redact_sensitive_shell_value(sanitized[key])
+    return sanitized
+
+
 def _render_prompt_for_inspection(
     pipeline: PipelineSpec,
     node: NodeSpec,
@@ -154,7 +162,7 @@ def _bootstrap_summary(target: dict[str, Any]) -> str | None:
     parts: list[str] = []
     shell = target.get("shell")
     if shell:
-        parts.append(f"shell={shell}")
+        parts.append(f"shell={redact_sensitive_shell_text(shell)}")
 
     if target.get("shell_login"):
         parts.append("login=true")
@@ -164,7 +172,7 @@ def _bootstrap_summary(target: dict[str, Any]) -> str | None:
 
     shell_init = render_shell_init(target.get("shell_init"))
     if shell_init:
-        parts.append(f"init={shell_init}")
+        parts.append(f"init={redact_sensitive_shell_text(shell_init)}")
 
     if not parts:
         return None
@@ -249,7 +257,7 @@ def build_launch_inspection(
             "depends_on": list(node.depends_on),
             "provider": node.provider.model_dump(mode="json") if hasattr(node.provider, "model_dump") else node.provider,
             "resolved_provider": resolved_provider.model_dump(mode="json") if resolved_provider is not None else None,
-            "target": node.target.model_dump(mode="json"),
+            "target": _sanitize_target(node.target.model_dump(mode="json")),
             "rendered_prompt": prompt,
             "rendered_prompt_preview": _preview_text(prompt, limit=120),
             "render_error": render_error,
@@ -265,8 +273,8 @@ def build_launch_inspection(
             },
             "launch": {
                 "kind": launch.kind,
-                "command": list(launch.command or []),
-                "command_text": _command_text(launch.command),
+                "command": redact_sensitive_shell_value(list(launch.command or [])),
+                "command_text": redact_sensitive_shell_text(_command_text(launch.command) or "") or None,
                 "cwd": launch.cwd,
                 "env": _sanitize_env(launch.env),
                 "env_keys": sorted(launch.env),

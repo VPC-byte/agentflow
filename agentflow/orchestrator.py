@@ -14,7 +14,7 @@ from agentflow.specs import NodeAttempt, NodeResult, NodeStatus, PipelineSpec, R
 from agentflow.store import RunStore
 from agentflow.success import evaluate_success
 from agentflow.traces import create_trace_parser
-from agentflow.utils import looks_sensitive_key, utcnow_iso
+from agentflow.utils import looks_sensitive_key, redact_sensitive_shell_value, utcnow_iso
 
 
 @dataclass(slots=True)
@@ -135,7 +135,7 @@ class Orchestrator:
         return {
             "attempt": attempt_number,
             "kind": plan.kind,
-            "command": list(plan.command) if plan.command is not None else None,
+            "command": redact_sensitive_shell_value(list(plan.command)) if plan.command is not None else None,
             "env": self._sanitize_launch_value("env", plan.env),
             "cwd": plan.cwd,
             "stdin": plan.stdin,
