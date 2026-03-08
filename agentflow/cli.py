@@ -40,6 +40,9 @@ class SmokePreflightMode(StrEnum):
     NEVER = "never"
 
 
+_KIMI_SHELL_PREFLIGHT_AGENTS = {"codex", "claude", "kimi"}
+
+
 def _build_runtime(runs_dir: str, max_concurrent_runs: int) -> tuple[object, object]:
     from agentflow.orchestrator import Orchestrator
     from agentflow.store import RunStore
@@ -349,7 +352,7 @@ def _node_uses_kimi_smoke_bootstrap(node: object) -> bool:
 
 def _node_kimi_shell_bootstrap_warning(node: object) -> str | None:
     agent = _status_value(getattr(node, "agent", None)).lower()
-    if agent not in {"codex", "claude"}:
+    if agent not in _KIMI_SHELL_PREFLIGHT_AGENTS:
         return None
 
     target = getattr(node, "target", None)
@@ -361,7 +364,7 @@ def _node_kimi_shell_bootstrap_warning(node: object) -> str | None:
 
 def _node_kimi_smoke_preflight_match(node: object) -> dict[str, str] | None:
     agent = _status_value(getattr(node, "agent", None)).lower()
-    if agent not in {"codex", "claude"}:
+    if agent not in _KIMI_SHELL_PREFLIGHT_AGENTS:
         return None
 
     target = getattr(node, "target", None)
@@ -446,7 +449,7 @@ def _auto_smoke_preflight_reason(path: str, pipeline: object) -> str | None:
     if resolved_path == bundled_path:
         return "path matches the bundled real-agent smoke pipeline."
     if _pipeline_uses_kimi_smoke_preflight(pipeline):
-        return "local Codex/Claude nodes use a `kimi` shell bootstrap."
+        return "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap."
     return None
 
 
@@ -463,7 +466,7 @@ def _auto_smoke_preflight_metadata(path: str, pipeline: object) -> dict[str, obj
         }
     return {
         "enabled": False,
-        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude node uses `kimi` bootstrap.",
+        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.",
         "matches": matches,
         "match_summary": match_summary,
     }

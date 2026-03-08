@@ -171,7 +171,7 @@ nodes:
 
     assert result.exit_code == 0
     assert "Pipeline: inspect-demo" in result.stdout
-    assert "Auto preflight: enabled - local Codex/Claude nodes use a `kimi` shell bootstrap." in result.stdout
+    assert "Auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap." in result.stdout
     assert "Auto preflight matches: plan (codex) via `target.shell_init`" in result.stdout
     assert "Note: Dependency references use placeholder node outputs" in result.stdout
     assert "- plan [codex/local]" in result.stdout
@@ -211,7 +211,7 @@ nodes:
     assert payload["pipeline"]["name"] == "inspect-json"
     assert payload["pipeline"]["auto_preflight"] == {
         "enabled": True,
-        "reason": "local Codex/Claude nodes use a `kimi` shell bootstrap.",
+        "reason": "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
         "matches": [
             {
                 "node_id": "review",
@@ -266,7 +266,7 @@ nodes:
         "name": "inspect-json-summary",
         "working_dir": str(tmp_path.resolve()),
         "node_count": 1,
-        "auto_preflight": "enabled - local Codex/Claude nodes use a `kimi` shell bootstrap.",
+        "auto_preflight": "enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
         "auto_preflight_matches": ["review (claude) via `target.shell_init`"],
     }
     assert payload["nodes"] == [
@@ -305,7 +305,7 @@ nodes:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["pipeline"]["auto_preflight"] == (
-        "disabled - path does not match the bundled smoke pipeline and no local Codex/Claude node uses `kimi` bootstrap."
+        "disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap."
     )
 
 
@@ -380,7 +380,7 @@ nodes:
     payload = json.loads(result.stdout)
     assert payload["pipeline"]["auto_preflight"] == {
         "enabled": False,
-        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude node uses `kimi` bootstrap.",
+        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.",
         "matches": [],
         "match_summary": [],
     }
@@ -409,7 +409,7 @@ nodes:
     payload = json.loads(result.stdout)
     assert payload["pipeline"]["auto_preflight"] == {
         "enabled": False,
-        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude node uses `kimi` bootstrap.",
+        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.",
         "matches": [],
         "match_summary": [],
     }
@@ -466,7 +466,7 @@ nodes:
     payload = json.loads(result.stdout)
     assert payload["pipeline"]["auto_preflight"] == {
         "enabled": False,
-        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude node uses `kimi` bootstrap.",
+        "reason": "path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.",
         "matches": [],
         "match_summary": [],
     }
@@ -569,12 +569,75 @@ nodes:
     payload = json.loads(result.stdout)
     assert payload["pipeline"]["auto_preflight"] == {
         "enabled": True,
-        "reason": "local Codex/Claude nodes use a `kimi` shell bootstrap.",
+        "reason": "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
         "matches": [{"node_id": "review", "agent": "claude", "trigger": "target.shell"}],
         "match_summary": ["review (claude) via `target.shell`"],
     }
     assert payload["nodes"][0]["warnings"] == [
         "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
+    ]
+
+
+def test_inspect_command_detects_backtick_eval_kimi_wrapper_in_auto_preflight(tmp_path):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-kimi-backtick-eval-wrapper
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: "bash -lc 'eval `kimi` && {command}'"
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["pipeline"]["auto_preflight"] == {
+        "enabled": True,
+        "reason": "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
+        "matches": [{"node_id": "review", "agent": "claude", "trigger": "target.shell"}],
+        "match_summary": ["review (claude) via `target.shell`"],
+    }
+    assert payload["nodes"][0]["warnings"] == [
+        "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
+    ]
+
+
+def test_inspect_command_detects_kimi_agent_in_auto_preflight(tmp_path):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-kimi-agent-bootstrap
+working_dir: .
+nodes:
+  - id: review
+    agent: kimi
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_init: kimi
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["pipeline"]["auto_preflight"] == {
+        "enabled": True,
+        "reason": "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
+        "matches": [{"node_id": "review", "agent": "kimi", "trigger": "target.shell_init"}],
+        "match_summary": ["review (kimi) via `target.shell_init`"],
+    }
+    assert payload["nodes"][0]["warnings"] == [
+        "`shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`."
     ]
 
 
@@ -733,6 +796,61 @@ nodes:
 
     assert result.exit_code == 0
     assert captured == {"pipeline": "kimi-eval-wrapper-preflight-warning"}
+    payload = json.loads(result.stderr)
+    assert payload["status"] == "warning"
+    assert payload["checks"] == [
+        {"name": "kimi_shell_helper", "status": "ok", "detail": "ready"},
+        {
+            "name": "kimi_shell_bootstrap",
+            "status": "warning",
+            "detail": "Node `review`: `target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`.",
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["run"],
+        ["smoke"],
+    ],
+)
+def test_run_and_smoke_preflight_warn_when_backtick_eval_kimi_wrapper_is_not_interactive(tmp_path, monkeypatch, command):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: kimi-backtick-wrapper-preflight-warning
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      shell: "bash -lc 'eval `kimi` && {command}'"
+""",
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        agentflow.cli,
+        "build_local_smoke_doctor_report",
+        lambda: DoctorReport(
+            status="ok",
+            checks=[DoctorCheck(name="kimi_shell_helper", status="ok", detail="ready")],
+        ),
+    )
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_run_pipeline",
+        lambda pipeline, runs_dir, max_concurrent_runs, output: captured.setdefault("pipeline", pipeline.name),
+    )
+
+    result = runner.invoke(app, [*command, str(pipeline_path), "--output", "json"])
+
+    assert result.exit_code == 0
+    assert captured == {"pipeline": "kimi-backtick-wrapper-preflight-warning"}
     payload = json.loads(result.stderr)
     assert payload["status"] == "warning"
     assert payload["checks"] == [
@@ -1094,6 +1212,51 @@ def test_run_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monkey
     assert captured["loaded_path"] == "custom-run.yaml"
     assert captured["submitted_pipeline"] is fake_pipeline
     assert captured["wait_run_id"] == "run-custom-kimi"
+    assert captured["wait_timeout"] is None
+
+
+def test_run_auto_runs_preflight_for_custom_pipeline_with_kimi_agent(monkeypatch):
+    captured: dict[str, object] = {}
+    doctor_calls = 0
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="run-custom-kimi-agent")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            captured["wait_timeout"] = timeout
+            return _completed_run(run_id, pipeline_name="custom-kimi-agent-run")
+
+    def fake_doctor_report():
+        nonlocal doctor_calls
+        doctor_calls += 1
+        return _doctor_report()
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                agent=SimpleNamespace(value="kimi"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi"),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["run", "custom-run.yaml"])
+
+    assert result.exit_code == 0
+    assert doctor_calls == 1
+    assert captured["loaded_path"] == "custom-run.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "run-custom-kimi-agent"
     assert captured["wait_timeout"] is None
 
 
@@ -1574,6 +1737,51 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monk
     assert captured["wait_timeout"] is None
 
 
+def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_agent(monkeypatch):
+    captured: dict[str, object] = {}
+    doctor_calls = 0
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="smoke-custom-kimi-agent")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            captured["wait_timeout"] = timeout
+            return _completed_run(run_id, pipeline_name="custom-kimi-agent-smoke")
+
+    def fake_doctor_report():
+        nonlocal doctor_calls
+        doctor_calls += 1
+        return _doctor_report()
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                agent=SimpleNamespace(value="kimi"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi"),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["smoke", "custom-smoke.yaml"])
+
+    assert result.exit_code == 0
+    assert doctor_calls == 1
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "smoke-custom-kimi-agent"
+    assert captured["wait_timeout"] is None
+
+
 def test_smoke_auto_runs_preflight_for_custom_pipeline_with_explicit_kimi_shell_wrapper(monkeypatch):
     captured: dict[str, object] = {}
     doctor_calls = 0
@@ -1616,6 +1824,51 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_explicit_kimi_shell_
     assert captured["loaded_path"] == "custom-smoke.yaml"
     assert captured["submitted_pipeline"] is fake_pipeline
     assert captured["wait_run_id"] == "smoke-custom-kimi-wrapper"
+    assert captured["wait_timeout"] is None
+
+
+def test_smoke_auto_runs_preflight_for_custom_pipeline_with_backtick_eval_kimi_shell_wrapper(monkeypatch):
+    captured: dict[str, object] = {}
+    doctor_calls = 0
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="smoke-custom-kimi-backtick-wrapper")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            captured["wait_timeout"] = timeout
+            return _completed_run(run_id, pipeline_name="custom-kimi-backtick-shell-wrapper")
+
+    def fake_doctor_report():
+        nonlocal doctor_calls
+        doctor_calls += 1
+        return _doctor_report()
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", fake_doctor_report)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                agent=SimpleNamespace(value="claude"),
+                target=SimpleNamespace(kind="local", shell="bash -lic 'eval `kimi` && {command}'", shell_init=None),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["smoke", "custom-smoke.yaml"])
+
+    assert result.exit_code == 0
+    assert doctor_calls == 1
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "smoke-custom-kimi-backtick-wrapper"
     assert captured["wait_timeout"] is None
 
 
@@ -1876,6 +2129,32 @@ def test_doctor_with_pipeline_path_augments_report_for_kimi_shell_bootstrap_warn
         "Doctor: warning\n"
         "- kimi_shell_helper: ok - ready\n"
         "- kimi_shell_bootstrap: warning - Node `claude_review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_augments_report_for_kimi_agent_bootstrap_warning(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="kimi_review",
+                agent=SimpleNamespace(value="kimi"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_init="kimi", shell_interactive=False),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["doctor", "custom-smoke.yaml", "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert result.stdout == (
+        "Doctor: warning\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- kimi_shell_bootstrap: warning - Node `kimi_review`: `shell_init: kimi` uses bash without interactive startup; helpers from `~/.bashrc` are usually unavailable. Set `target.shell_interactive: true` or use `bash -lic`.\n"
     )
 
 
