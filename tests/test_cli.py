@@ -226,6 +226,10 @@ def test_smoke_runs_when_bundled_preflight_warns(monkeypatch):
 
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {"id": "smoke-warning", "status": "completed"}
+    assert json.loads(result.stderr) == {
+        "status": "warning",
+        "checks": [{"name": "claude", "status": "warning", "detail": "bootstrap-only"}],
+    }
     assert captured["loaded_path"] == "examples/local-real-agents-kimi-smoke.yaml"
     assert captured["submitted_pipeline"] is fake_pipeline
     assert captured["wait_run_id"] == "smoke-warning"
