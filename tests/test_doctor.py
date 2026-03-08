@@ -15,7 +15,7 @@ def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkey
     monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
     monkeypatch.setattr(
         "agentflow.doctor.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=0, stdout="kimi is a function\n", stderr=""),
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr=""),
     )
 
     report = build_local_smoke_doctor_report(home=home)
@@ -34,7 +34,7 @@ def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkey
             {
                 "name": "kimi_shell_helper",
                 "status": "ok",
-                "detail": "`kimi` is available in `bash -lic` for the bundled smoke pipeline.",
+                "detail": "`kimi` is available in `bash -lic` and exports `ANTHROPIC_API_KEY` for the bundled smoke pipeline.",
             },
         ],
     }
@@ -56,7 +56,7 @@ def test_local_smoke_doctor_report_follows_transitive_profile_bridge(tmp_path: P
     monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
     monkeypatch.setattr(
         "agentflow.doctor.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=0, stdout="kimi is a function\n", stderr=""),
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr=""),
     )
 
     report = build_local_smoke_doctor_report(home=home)
@@ -78,7 +78,7 @@ def test_local_smoke_doctor_report_fails_when_kimi_helper_missing(tmp_path: Path
     monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
     monkeypatch.setattr(
         "agentflow.doctor.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=1, stdout="", stderr="bash: type: kimi: not found\n"),
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=11, stdout="", stderr="bash: type: kimi: not found\n"),
     )
 
     report = build_local_smoke_doctor_report(home=home)
@@ -116,8 +116,8 @@ def test_local_smoke_doctor_report_checks_kimi_helper_in_supplied_home(tmp_path:
         home_value = env.get("HOME")
         return subprocess.CompletedProcess(
             args=args[0],
-            returncode=0 if home_value == str(home) else 1,
-            stdout="kimi is a function\n" if home_value == str(home) else "",
+            returncode=0 if home_value == str(home) else 11,
+            stdout="",
             stderr="" if home_value == str(home) else "bash: type: kimi: not found\n",
         )
 
@@ -129,7 +129,29 @@ def test_local_smoke_doctor_report_checks_kimi_helper_in_supplied_home(tmp_path:
     assert report.as_dict()["checks"][-1] == {
         "name": "kimi_shell_helper",
         "status": "ok",
-        "detail": "`kimi` is available in `bash -lic` for the bundled smoke pipeline.",
+        "detail": "`kimi` is available in `bash -lic` and exports `ANTHROPIC_API_KEY` for the bundled smoke pipeline.",
+    }
+
+
+def test_local_smoke_doctor_report_fails_when_kimi_helper_does_not_export_api_key(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
+    monkeypatch.setattr(
+        "agentflow.doctor.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=13, stdout="", stderr=""),
+    )
+
+    report = build_local_smoke_doctor_report(home=home)
+
+    assert report.status == "failed"
+    assert report.as_dict()["checks"][-1] == {
+        "name": "kimi_shell_helper",
+        "status": "failed",
+        "detail": "`kimi` runs in `bash -lic`, but it does not export `ANTHROPIC_API_KEY`; the bundled smoke pipeline will not be able to authenticate Claude-on-Kimi.",
     }
 
 
