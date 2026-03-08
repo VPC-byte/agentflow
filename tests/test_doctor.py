@@ -96,6 +96,41 @@ def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkey
     }
 
 
+def test_local_smoke_doctor_report_includes_host_cli_versions(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: f"/tmp/{name}")
+
+    def fake_run(*args, **kwargs):
+        command = args[0]
+        if command == ["/tmp/codex", "--version"]:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="codex-cli 0.111.0\n", stderr="")
+        if command == ["/tmp/claude", "--version"]:
+            return subprocess.CompletedProcess(args=command, returncode=0, stdout="2.1.52 (Claude Code)\n", stderr="")
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentflow.doctor.subprocess.run", fake_run)
+
+    report = build_local_smoke_doctor_report(home=home)
+
+    assert report.status == "ok"
+    assert report.as_dict()["checks"][0] == {
+        "name": "codex",
+        "status": "ok",
+        "detail": "Found `codex` at `/tmp/codex` (version `codex-cli 0.111.0`).",
+        "context": {"path": "/tmp/codex", "version": "codex-cli 0.111.0"},
+    }
+    assert report.as_dict()["checks"][1] == {
+        "name": "claude",
+        "status": "ok",
+        "detail": "Found `claude` at `/tmp/claude` (version `2.1.52 (Claude Code)`).",
+        "context": {"path": "/tmp/claude", "version": "2.1.52 (Claude Code)"},
+    }
+
+
 def test_local_smoke_doctor_report_ok_with_quoted_home_prefix_bridge(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()

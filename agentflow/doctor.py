@@ -201,6 +201,46 @@ def _format_shell_diagnostic(stderr: str) -> str:
     return "\n".join(sanitized_lines).strip()
 
 
+def _first_nonempty_output_line(*streams: str | None) -> str | None:
+    for stream in streams:
+        if not isinstance(stream, str):
+            continue
+        for raw_line in stream.splitlines():
+            line = raw_line.strip()
+            if line:
+                return line
+    return None
+
+
+def _probe_executable_version(path: str) -> str | None:
+    try:
+        result = subprocess.run(
+            [path, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    return _first_nonempty_output_line(result.stdout, result.stderr)
+
+
+def _executable_ok_check(name: str, path: str) -> DoctorCheck:
+    version = _probe_executable_version(path)
+    if not version:
+        return DoctorCheck(name=name, status="ok", detail=f"Found `{name}` at `{path}`.")
+    return DoctorCheck(
+        name=name,
+        status="ok",
+        detail=f"Found `{name}` at `{path}` (version `{version}`).",
+        context={"path": path, "version": version},
+    )
+
+
 class _ShellStartupReadError(RuntimeError):
     def __init__(self, path: str, detail: str):
         super().__init__(detail)
@@ -592,14 +632,14 @@ def build_pipeline_local_codex_auth_checks(pipeline: object) -> list[DoctorCheck
 def _check_executable(name: str) -> DoctorCheck:
     path = shutil.which(name)
     if path:
-        return DoctorCheck(name=name, status="ok", detail=f"Found `{name}` at `{path}`.")
+        return _executable_ok_check(name, path)
     return DoctorCheck(name=name, status="failed", detail=f"`{name}` is not on PATH.")
 
 
 def _check_codex_executable(home: Path | None = None) -> DoctorCheck:
     path = shutil.which("codex")
     if path:
-        return DoctorCheck(name="codex", status="ok", detail=f"Found `codex` at `{path}`.")
+        return _executable_ok_check("codex", path)
 
     env = os.environ.copy()
     if home is not None:
@@ -645,7 +685,7 @@ def _check_codex_executable(home: Path | None = None) -> DoctorCheck:
 def _check_claude_host_executable() -> DoctorCheck:
     path = shutil.which("claude")
     if path:
-        return DoctorCheck(name="claude", status="ok", detail=f"Found `claude` at `{path}`.")
+        return _executable_ok_check("claude", path)
     return DoctorCheck(
         name="claude",
         status="warning",
