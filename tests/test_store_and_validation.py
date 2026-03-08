@@ -35,6 +35,32 @@ def test_pipeline_validation_rejects_codex_kimi_provider_alias():
         )
 
 
+@pytest.mark.parametrize(
+    ("target_patch", "expected_field"),
+    [
+        ({"shell_login": True}, "shell_login"),
+        ({"shell_interactive": True}, "shell_interactive"),
+        ({"shell_init": "kimi"}, "shell_init"),
+    ],
+)
+def test_pipeline_validation_rejects_local_shell_bootstrap_without_shell(target_patch, expected_field):
+    with pytest.raises(ValueError, match=rf"{expected_field}.*target\.shell"):
+        PipelineSpec.model_validate(
+            {
+                "name": "invalid-local-shell-target",
+                "working_dir": ".",
+                "nodes": [
+                    {
+                        "id": "plan",
+                        "agent": "claude",
+                        "prompt": "plan",
+                        "target": {"kind": "local", **target_patch},
+                    },
+                ],
+            }
+        )
+
+
 @pytest.mark.asyncio
 async def test_store_loads_runs_and_artifacts_from_disk(tmp_path):
     pipeline = PipelineSpec.model_validate(
