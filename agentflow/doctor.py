@@ -5,6 +5,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -278,6 +279,13 @@ def _local_claude_ready_check_detail(node_id: str, executable: str) -> str:
     )
 
 
+def _local_kimi_ready_check_detail(node_id: str, probe_command: str) -> str:
+    return (
+        f"Node `{node_id}` (kimi) cannot launch the local Kimi bridge after the node shell bootstrap; "
+        f"`{probe_command}` fails in the prepared local shell."
+    )
+
+
 def _node_pipeline_workdir(node: object, pipeline: object | None = None) -> Path:
     working_path = _object_value(node, "working_path")
     if working_path is None and pipeline is not None:
@@ -375,6 +383,41 @@ def _prepared_claude_readiness_execution(
     return prepared, paths, executable
 
 
+def _prepared_kimi_readiness_execution(
+    node: object,
+    pipeline: object | None = None,
+) -> tuple[PreparedExecution, object, str] | None:
+    agent = _status_value(_object_value(node, "agent")).lower()
+    if agent != AgentKind.KIMI.value:
+        return None
+
+    target = _coerce_local_target(_object_value(node, "target"))
+    if target is None:
+        return None
+
+    provider = resolve_provider(_object_value(node, "provider"), AgentKind.KIMI)
+    env = merge_env_layers(_object_value(provider, "env"), _object_value(node, "env"))
+    executable = str(_object_value(node, "executable") or sys.executable or "python3")
+    probe_command = [executable, "-c", "import agentflow.remote.kimi_bridge"]
+
+    pipeline_workdir = _node_pipeline_workdir(node, pipeline)
+    paths = build_execution_paths(
+        base_dir=Path.cwd() / ".agentflow" / "doctor",
+        pipeline_workdir=pipeline_workdir,
+        run_id="doctor",
+        node_id=str(_object_value(node, "id", "kimi")),
+        node_target=target,
+        create_runtime_dir=False,
+    )
+    prepared = PreparedExecution(
+        command=probe_command,
+        env=env,
+        cwd=str(paths.host_workdir),
+        trace_kind="final",
+    )
+    return prepared, paths, shlex.join(probe_command)
+
+
 def _can_authenticate_local_codex(node: object, pipeline: object | None = None) -> bool:
     prepared_with_paths = _prepared_codex_auth_execution(node, pipeline)
     if prepared_with_paths is None:
@@ -441,6 +484,38 @@ def _can_launch_local_claude(node: object, pipeline: object | None = None) -> tu
     return result.returncode == 0, executable
 
 
+def _can_launch_local_kimi(node: object, pipeline: object | None = None) -> tuple[bool, str | None]:
+    prepared_with_paths = _prepared_kimi_readiness_execution(node, pipeline)
+    if prepared_with_paths is None:
+        return True, None
+
+    prepared, paths, probe_command = prepared_with_paths
+
+    try:
+        launch_plan = LocalRunner().plan_execution(
+            SimpleNamespace(target=_coerce_local_target(_object_value(node, "target"))),
+            prepared,
+            paths,
+        )
+    except Exception:
+        return False, probe_command
+
+    env = os.environ.copy()
+    env.update(launch_plan.env)
+    try:
+        result = subprocess.run(
+            launch_plan.command,
+            check=False,
+            capture_output=True,
+            cwd=launch_plan.cwd,
+            env=env,
+            text=True,
+        )
+    except OSError:
+        return False, probe_command
+    return result.returncode == 0, probe_command
+
+
 def build_pipeline_local_claude_readiness_checks(pipeline: object) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
     for node in _object_value(pipeline, "nodes", []) or []:
@@ -458,6 +533,28 @@ def build_pipeline_local_claude_readiness_checks(pipeline: object) -> list[Docto
                 name="claude_ready",
                 status="failed",
                 detail=_local_claude_ready_check_detail(node_id, executable or "claude"),
+            )
+        )
+    return checks
+
+
+def build_pipeline_local_kimi_readiness_checks(pipeline: object) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    for node in _object_value(pipeline, "nodes", []) or []:
+        agent = _status_value(_object_value(node, "agent")).lower()
+        if agent != AgentKind.KIMI.value:
+            continue
+
+        ready, probe_command = _can_launch_local_kimi(node, pipeline)
+        if ready:
+            continue
+
+        node_id = str(_object_value(node, "id", "kimi"))
+        checks.append(
+            DoctorCheck(
+                name="kimi_ready",
+                status="failed",
+                detail=_local_kimi_ready_check_detail(node_id, probe_command or "python -c 'import agentflow.remote.kimi_bridge'"),
             )
         )
     return checks
