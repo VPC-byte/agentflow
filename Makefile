@@ -12,7 +12,7 @@ help:
 	  '  inspect-local Inspect the bundled local Kimi-backed smoke pipeline' \
 	  '  doctor-local  Check local Codex/Claude/Kimi smoke prerequisites' \
 	  '  smoke-local   Run the bundled local Codex + Claude-on-Kimi smoke test' \
-	  '  check-local   Run doctor-local, then smoke-local'
+	  '  check-local   Run the single-pass doctor-then-smoke CLI shortcut'
 
 test:
 	$(PYTHON) -m pytest -q
@@ -26,4 +26,5 @@ doctor-local:
 smoke-local:
 	$(PYTHON) -m agentflow smoke --show-preflight
 
-check-local: doctor-local smoke-local
+check-local:
+	$(PYTHON) -m agentflow check-local
