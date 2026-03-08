@@ -32,6 +32,7 @@ _ENV_ASSIGNMENT_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 _SHELL_CONTROL_TOKENS = {"&&", "||", "|", ";", "do", "then", "elif"}
 _KIMI_SUBSTITUTION_CONSUMERS = {".", "eval", "source"}
 _COMMAND_SUBSTITUTION_PATTERN = re.compile(r"(?:\$|<)\(([^()]*)\)")
+_BACKTICK_COMMAND_SUBSTITUTION_PATTERN = re.compile(r"(?<!\\)`([^`]*)`")
 
 
 def _target_value(target: Any, key: str) -> Any:
@@ -92,7 +93,7 @@ def _looks_like_kimi_token(token: str) -> bool:
 
 
 def _token_uses_kimi_substitution(token: str) -> bool:
-    for body in _COMMAND_SUBSTITUTION_PATTERN.findall(token):
+    for body in (*_COMMAND_SUBSTITUTION_PATTERN.findall(token), *_BACKTICK_COMMAND_SUBSTITUTION_PATTERN.findall(token)):
         if shell_command_uses_kimi_helper(body):
             return True
     return False

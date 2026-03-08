@@ -29,8 +29,10 @@ def test_shell_command_uses_kimi_helper_ignores_probe_commands(command: str):
         "bash -lc 'type kimi >/dev/null 2>&1; kimi; {command}'",
         "bash -lc 'which kimi >/dev/null; kimi && {command}'",
         'eval "$(kimi)"',
+        'eval `kimi`',
         'source <(kimi)',
         "bash -lc 'eval \"$(kimi)\" && {command}'",
+        "bash -lc 'eval `kimi` && {command}'",
         "bash -lc 'source <(kimi) && {command}'",
     ],
 )
@@ -74,6 +76,18 @@ def test_kimi_shell_init_requires_interactive_bash_warning_detects_eval_style_sh
     target = {
         "kind": "local",
         "shell": "bash -lc 'eval \"$(kimi)\" && {command}'",
+    }
+
+    assert kimi_shell_init_requires_interactive_bash_warning(target) == (
+        "`target.shell` uses `kimi` with bash without interactive startup; helpers from `~/.bashrc` are usually "
+        "unavailable. Add `-i`, set `target.shell_interactive: true`, or use `bash -lic`."
+    )
+
+
+def test_kimi_shell_init_requires_interactive_bash_warning_detects_backtick_eval_shell_wrapper():
+    target = {
+        "kind": "local",
+        "shell": "bash -lc 'eval `kimi` && {command}'",
     }
 
     assert kimi_shell_init_requires_interactive_bash_warning(target) == (
