@@ -218,6 +218,50 @@ def test_claude_adapter_prefers_node_env_over_provider_env(tmp_path):
     assert prepared.env["ANTHROPIC_API_KEY"] == "node-secret"
 
 
+def test_claude_adapter_respects_node_env_clear_for_custom_provider_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_CLAUDE_API_KEY", "ambient-secret")
+    node = NodeSpec.model_validate(
+        {
+            "id": "review",
+            "agent": "claude",
+            "prompt": "Review",
+            "env": {"TEST_CLAUDE_API_KEY": ""},
+            "provider": {
+                "name": "kimi-proxy",
+                "base_url": "https://example.test/anthropic",
+                "api_key_env": "TEST_CLAUDE_API_KEY",
+            },
+        }
+    )
+
+    prepared = ClaudeAdapter().prepare(node, "Review", _paths(tmp_path))
+
+    assert prepared.env["TEST_CLAUDE_API_KEY"] == ""
+    assert prepared.env["ANTHROPIC_API_KEY"] == ""
+
+
+def test_claude_adapter_respects_provider_env_clear_for_custom_provider_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("TEST_CLAUDE_API_KEY", "ambient-secret")
+    node = NodeSpec.model_validate(
+        {
+            "id": "review",
+            "agent": "claude",
+            "prompt": "Review",
+            "provider": {
+                "name": "kimi-proxy",
+                "base_url": "https://example.test/anthropic",
+                "api_key_env": "TEST_CLAUDE_API_KEY",
+                "env": {"TEST_CLAUDE_API_KEY": ""},
+            },
+        }
+    )
+
+    prepared = ClaudeAdapter().prepare(node, "Review", _paths(tmp_path))
+
+    assert prepared.env["TEST_CLAUDE_API_KEY"] == ""
+    assert prepared.env["ANTHROPIC_API_KEY"] == ""
+
+
 def test_codex_adapter_prefers_node_env_over_provider_env(tmp_path):
     node = NodeSpec.model_validate(
         {

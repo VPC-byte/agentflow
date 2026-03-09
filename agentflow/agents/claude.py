@@ -80,8 +80,11 @@ class ClaudeAdapter(AgentAdapter):
             if provider.headers:
                 env.setdefault("ANTHROPIC_CUSTOM_HEADERS", json.dumps(provider.headers, ensure_ascii=False))
             if provider.api_key_env:
-                api_key = env.get(provider.api_key_env) or os.getenv(provider.api_key_env)
-                if api_key:
+                if provider.api_key_env in env:
+                    api_key = env[provider.api_key_env]
+                else:
+                    api_key = os.getenv(provider.api_key_env)
+                if api_key is not None:
                     env.setdefault("ANTHROPIC_API_KEY", api_key)
         command.extend(node.extra_args)
         return PreparedExecution(
