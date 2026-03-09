@@ -17,6 +17,76 @@ agentflow_repo_python() {
   printf '%s\n' "python3"
 }
 
+agentflow_local_verify_timeout_seconds() {
+  local python_bin="$1"
+  local timeout_name=""
+  local raw_timeout=""
+
+  if [ -n "${AGENTFLOW_LOCAL_VERIFY_TIMEOUT_SECONDS:-}" ]; then
+    timeout_name="AGENTFLOW_LOCAL_VERIFY_TIMEOUT_SECONDS"
+    raw_timeout="$AGENTFLOW_LOCAL_VERIFY_TIMEOUT_SECONDS"
+  elif [ -n "${AGENTFLOW_DOCTOR_TIMEOUT_SECONDS:-}" ]; then
+    timeout_name="AGENTFLOW_DOCTOR_TIMEOUT_SECONDS"
+    raw_timeout="$AGENTFLOW_DOCTOR_TIMEOUT_SECONDS"
+  else
+    raw_timeout="15"
+  fi
+
+  "$python_bin" - "$raw_timeout" "$timeout_name" <<'PY'
+import math
+import sys
+
+raw_timeout = sys.argv[1]
+timeout_name = sys.argv[2] or "maintainer verify timeout"
+
+try:
+    timeout_seconds = float(raw_timeout)
+except ValueError as exc:
+    raise SystemExit(f"{timeout_name} must be a positive number, got {raw_timeout!r}") from exc
+
+if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+    raise SystemExit(f"{timeout_name} must be a positive number, got {raw_timeout!r}")
+
+print(timeout_seconds)
+PY
+}
+
+agentflow_run_with_timeout() {
+  local python_bin="$1"
+  shift
+
+  local timeout_seconds
+  timeout_seconds="$(agentflow_local_verify_timeout_seconds "$python_bin")"
+
+  "$python_bin" - "$timeout_seconds" "$@" <<'PY'
+import os
+import shlex
+import subprocess
+import sys
+import signal
+
+timeout_seconds = float(sys.argv[1])
+command = sys.argv[2:]
+
+process = subprocess.Popen(command, start_new_session=True)
+
+try:
+    raise SystemExit(process.wait(timeout=timeout_seconds))
+except subprocess.TimeoutExpired:
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    print(
+        f"Timed out after {timeout_seconds:g}s: {shlex.join(command)}",
+        file=sys.stderr,
+    )
+    raise SystemExit(124)
+PY
+}
+
 select_custom_local_kimi_pipeline_mode() {
   local pipeline_mode="${AGENTFLOW_KIMI_PIPELINE_MODE:-bootstrap}"
 

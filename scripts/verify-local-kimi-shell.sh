@@ -3,15 +3,9 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-python_bin="${AGENTFLOW_PYTHON:-}"
+. "$script_dir/custom-local-kimi-helpers.sh"
 
-if [ -z "$python_bin" ]; then
-  if [ -x "$repo_root/.venv/bin/python" ]; then
-    python_bin="$repo_root/.venv/bin/python"
-  else
-    python_bin="python3"
-  fi
-fi
+python_bin="$(agentflow_repo_python "$repo_root")"
 
 expected_anthropic_base_url='https://api.kimi.com/coding/'
 bash_login_startup="$(
@@ -68,7 +62,7 @@ printf "~/.profile: %s\n" "$profile_status"
 printf "bash login startup: %s\n" "$bash_login_startup"
 printf "%s\n" "$bash_login_bridge_summary"
 
-EXPECTED_ANTHROPIC_BASE_URL="$expected_anthropic_base_url" bash -lic '
+agentflow_run_with_timeout "$python_bin" env EXPECTED_ANTHROPIC_BASE_URL="$expected_anthropic_base_url" bash -lic '
 command -v kimi >/dev/null 2>&1
 kimi >/dev/null
 [ -n "${ANTHROPIC_API_KEY:-}" ] || {
