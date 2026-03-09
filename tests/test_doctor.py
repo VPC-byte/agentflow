@@ -9,12 +9,14 @@ from agentflow.doctor import (
     DoctorCheck,
     _check_claude_executable,
     _check_bash_login_startup,
+    _prepared_kimi_readiness_execution,
     _should_probe_local_claude,
     build_bash_login_shell_bridge_recommendation,
     build_local_smoke_doctor_report,
     build_pipeline_local_codex_auth_checks,
     build_pipeline_local_codex_readiness_checks,
 )
+from agentflow.prepared import ExecutionPaths
 from agentflow.specs import ProviderConfig
 
 
@@ -112,6 +114,38 @@ def test_pipeline_local_codex_checks_use_custom_executable(monkeypatch):
     assert build_pipeline_local_codex_auth_checks(pipeline) == []
     assert "custom-codex --version" in captured_target_commands
     assert "custom-codex login status" in captured_target_commands
+
+
+def test_prepared_kimi_readiness_execution_prefers_repo_venv_python(monkeypatch, tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_python = repo_root / ".venv" / "bin" / "python"
+    repo_python.parent.mkdir(parents=True)
+    repo_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    paths = ExecutionPaths(
+        host_workdir=tmp_path,
+        host_runtime_dir=tmp_path / ".runtime",
+        target_workdir=str(tmp_path),
+        target_runtime_dir=str(tmp_path / ".runtime"),
+        app_root=repo_root,
+    )
+    node = SimpleNamespace(
+        id="kimi_review",
+        agent=SimpleNamespace(value="kimi"),
+        provider=None,
+        env={},
+        executable=None,
+        target=SimpleNamespace(kind="local", shell=None, shell_login=False, shell_interactive=False, shell_init=None, cwd=None),
+    )
+
+    monkeypatch.setattr("agentflow.doctor.build_execution_paths", lambda **kwargs: paths)
+    monkeypatch.setattr("agentflow.agents.kimi.sys.executable", "/usr/bin/python3")
+
+    prepared, prepared_paths, probe_command = _prepared_kimi_readiness_execution(node)
+
+    assert prepared_paths == paths
+    assert prepared.command == [str(repo_python), "-c", "import agentflow.remote.kimi_bridge"]
+    assert probe_command == f"{repo_python} -c 'import agentflow.remote.kimi_bridge'"
 
 
 def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkeypatch):

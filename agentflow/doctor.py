@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from agentflow.agents.kimi import default_kimi_executable
 from agentflow.env import merge_env_layers
 from agentflow.local_shell import (
     kimi_shell_init_requires_bash_warning,
@@ -511,8 +512,6 @@ def _prepared_kimi_readiness_execution(
 
     provider = resolve_provider(_object_value(node, "provider"), AgentKind.KIMI)
     env = merge_env_layers(_object_value(provider, "env"), _object_value(node, "env"))
-    executable = str(_object_value(node, "executable") or sys.executable or "python3")
-    probe_command = [executable, "-c", "import agentflow.remote.kimi_bridge"]
 
     pipeline_workdir = _node_pipeline_workdir(node, pipeline)
     paths = build_execution_paths(
@@ -523,6 +522,8 @@ def _prepared_kimi_readiness_execution(
         node_target=target,
         create_runtime_dir=False,
     )
+    executable = str(_object_value(node, "executable") or default_kimi_executable(paths))
+    probe_command = [executable, "-c", "import agentflow.remote.kimi_bridge"]
     prepared = PreparedExecution(
         command=probe_command,
         env=env,
