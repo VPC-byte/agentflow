@@ -18,6 +18,12 @@ from agentflow.specs import ProviderConfig
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _clear_ambient_base_url_env(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
+
 def _capture_pipeline_loader(captured: dict[str, object], fake_pipeline: object):
     def _load(path: str):
         captured["loaded_path"] = path
