@@ -13,7 +13,11 @@ import yaml
 
 import typer
 from pydantic import ValidationError
-from agentflow.defaults import default_smoke_pipeline_path
+from agentflow.defaults import (
+    bundled_template_names,
+    load_bundled_template_yaml,
+    default_smoke_pipeline_path,
+)
 from agentflow.doctor import (
     DoctorCheck,
     DoctorReport,
@@ -1563,6 +1567,46 @@ def serve(
 def validate(path: str) -> None:
     pipeline = _load_pipeline(path)
     typer.echo(json.dumps(pipeline.model_dump(mode="json"), indent=2))
+
+
+@app.command()
+def init(
+    path: str | None = typer.Argument(
+        None,
+        help="Optional destination path. When omitted or `-`, print the selected template to stdout.",
+    ),
+    template: str = typer.Option(
+        "pipeline",
+        "--template",
+        "-t",
+        help=f"Bundled template name ({', '.join(bundled_template_names())}).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite an existing destination file.",
+    ),
+) -> None:
+    try:
+        template_yaml = load_bundled_template_yaml(template)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--template") from exc
+
+    if path is None or path == "-":
+        typer.echo(template_yaml, nl=False)
+        return
+
+    destination = Path(path).expanduser()
+    if destination.exists() and destination.is_dir():
+        typer.echo(f"Destination `{destination}` is a directory.", err=True)
+        raise typer.Exit(code=1)
+    if destination.exists() and not force:
+        typer.echo(f"Destination `{destination}` already exists. Use `--force` to overwrite it.", err=True)
+        raise typer.Exit(code=1)
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(template_yaml, encoding="utf-8")
+    typer.echo(f"Wrote `{template}` template to `{destination}`.")
 
 
 @app.command()
