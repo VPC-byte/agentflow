@@ -71,6 +71,7 @@ Run a pipeline once:
 agentflow run examples/pipeline.yaml
 ```
 
+On an interactive terminal, `agentflow run` now defaults to the same compact per-node summary that `smoke` uses; when stdout is redirected or piped, it still defaults to the full JSON run record so scripts do not break. You can always force either shape with `--output summary`, `--output json-summary`, or `--output json`.
 When you use `agentflow run` with the bundled real-agent smoke file, an explicit reference to that bundled file, or a custom local pipeline that clearly bootstraps local Codex, Claude, or Kimi nodes through `kimi`, AgentFlow now runs the same local preflight as `agentflow smoke` by default. Use `--preflight never` when you intentionally want to bypass those readiness checks.
 Add `--show-preflight` when you want `run` to print the successful local preflight summary before execution starts. That summary is written to stderr so `--output json` and `--output json-summary` remain machine-readable on stdout, and it now also explains why auto preflight ran plus the matching node bootstrap sources when available.
 
@@ -385,7 +386,7 @@ agentflow doctor
 
 When `codex` or `claude` are already on `PATH`, the doctor summary now includes the resolved executable path and `--version` output to make local CLI mismatches easier to spot. Use `agentflow doctor --output json-summary` when you want the same machine-readable flag that the other orchestration commands already accept.
 
-The bundled smoke pipeline bootstraps the `kimi` shell helper inside both local nodes, so you do not need to wrap the entire `agentflow smoke` command in `bash -lic`. If you want to run a custom smoke pipeline instead, pass its path explicitly with `agentflow smoke path/to/pipeline.yaml`, or run it directly with `agentflow run path/to/pipeline.yaml` and keep the same `auto` preflight behavior for bundled and Kimi-bootstrapped local smoke pipelines. Use `--preflight always` for other custom pipelines that still need those checks, or `--preflight never` to skip preflight even for the bundled example. Add `--output json-summary` when you want a concise machine-readable result, or `--output json` when you want the full persisted run record instead of the compact summary.
+The bundled smoke pipeline bootstraps the `kimi` shell helper inside both local nodes, so you do not need to wrap the entire `agentflow smoke` command in `bash -lic`. If you want to run a custom smoke pipeline instead, pass its path explicitly with `agentflow smoke path/to/pipeline.yaml`, or run it directly with `agentflow run path/to/pipeline.yaml` and keep the same `auto` preflight behavior for bundled and Kimi-bootstrapped local smoke pipelines. `run` now mirrors `smoke` by defaulting to the compact summary on an interactive terminal while still falling back to full JSON when stdout is redirected. Use `--preflight always` for other custom pipelines that still need those checks, or `--preflight never` to skip preflight even for the bundled example. Add `--output json-summary` when you want a concise machine-readable result, or `--output json` when you want the full persisted run record instead of the compact summary.
 
 ## Reference sources
 
