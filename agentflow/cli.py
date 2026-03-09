@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import json
+import subprocess
 import sys
 from dataclasses import replace
 from datetime import datetime
@@ -31,8 +32,10 @@ from agentflow.local_shell import (
     shell_init_exports_env_var,
     shell_init_uses_kimi_helper,
     shell_template_exports_env_var_before_command,
+    target_bash_home,
+    target_uses_login_bash,
 )
-from agentflow.specs import AgentKind, provider_uses_kimi_anthropic_auth, resolve_provider
+from agentflow.specs import AgentKind, LocalTarget, provider_uses_kimi_anthropic_auth, resolve_provider
 
 app = typer.Typer(add_completion=False)
 
@@ -574,6 +577,27 @@ def _pipeline_kimi_shell_bootstrap_checks(pipeline: object) -> list[DoctorCheck]
     return checks
 
 
+def _target_value(target: object, key: str, default: object | None = None) -> object | None:
+    if isinstance(target, dict):
+        return target.get(key, default)
+    return getattr(target, key, default)
+
+
+def _coerce_local_target(target: object) -> LocalTarget | None:
+    if _status_value(_target_value(target, "kind")).lower() != "local":
+        return None
+
+    payload = {
+        "kind": "local",
+        "cwd": _target_value(target, "cwd"),
+        "shell": _target_value(target, "shell"),
+        "shell_login": bool(_target_value(target, "shell_login", False)),
+        "shell_interactive": bool(_target_value(target, "shell_interactive", False)),
+        "shell_init": _target_value(target, "shell_init"),
+    }
+    return LocalTarget.model_validate(payload)
+
+
 def _resolved_provider_api_key_env(node: object) -> tuple[str | None, str | None]:
     agent = _status_value(getattr(node, "agent", None)).lower()
     if agent not in {member.value for member in AgentKind}:
@@ -593,8 +617,8 @@ def _provider_credentials_come_from_local_bootstrap(
     api_key_env: str,
     provider: object | None,
 ) -> bool:
-    target = getattr(node, "target", None)
-    if getattr(target, "kind", None) == "local":
+    target = _coerce_local_target(getattr(node, "target", None))
+    if target is not None:
         shell_init = getattr(target, "shell_init", None)
         if shell_init_exports_env_var(shell_init, api_key_env):
             return True
@@ -604,6 +628,22 @@ def _provider_credentials_come_from_local_bootstrap(
             return True
         if shell_command_prefixes_env_var(shell if isinstance(shell, str) else None, api_key_env):
             return True
+        if target_uses_login_bash(target):
+            effective_home = target_bash_home(target)
+            env = os.environ.copy()
+            env["HOME"] = str(effective_home)
+            try:
+                result = subprocess.run(
+                    ["bash", "-lc", f'test -n "${{{api_key_env}:-}}"'],
+                    check=False,
+                    capture_output=True,
+                    env=env,
+                    text=True,
+                )
+            except OSError:
+                result = None
+            if result is not None and result.returncode == 0:
+                return True
 
     if api_key_env == "ANTHROPIC_API_KEY" and provider_uses_kimi_anthropic_auth(provider):
         return _node_uses_kimi_smoke_bootstrap(node)
