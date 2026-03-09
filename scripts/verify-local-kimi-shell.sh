@@ -27,6 +27,22 @@ target = {
 print(summarize_target_bash_login_startup(target) or "n/a")
 PY
 )"
+bash_login_bridge_summary="$(
+  PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" - <<'PY'
+from agentflow.doctor import build_bash_login_shell_bridge_recommendation
+
+recommendation = build_bash_login_shell_bridge_recommendation()
+if recommendation is None:
+    print("bash login bridge: not needed")
+else:
+    print(f"bash login bridge target: {recommendation.target}")
+    print(f"bash login bridge source: {recommendation.source}")
+    print(f"bash login bridge reason: {recommendation.reason}")
+    print("bash login bridge snippet:")
+    for line in recommendation.snippet.rstrip().splitlines():
+        print(f"  {line}")
+PY
+)"
 
 if [ -f "$HOME/.bash_profile" ]; then
   bash_profile_status="present"
@@ -50,6 +66,7 @@ printf "~/.bash_profile: %s\n" "$bash_profile_status"
 printf "~/.bash_login: %s\n" "$bash_login_status"
 printf "~/.profile: %s\n" "$profile_status"
 printf "bash login startup: %s\n" "$bash_login_startup"
+printf "%s\n" "$bash_login_bridge_summary"
 
 EXPECTED_ANTHROPIC_BASE_URL="$expected_anthropic_base_url" bash -lic '
 command -v kimi >/dev/null 2>&1
