@@ -10,7 +10,7 @@ from agentflow.prepared import ExecutionPaths, PreparedExecution
 from agentflow.specs import NodeSpec
 
 
-def _default_kimi_executable(paths: ExecutionPaths) -> str:
+def default_kimi_executable(paths: ExecutionPaths) -> str:
     current_python = Path(sys.executable).expanduser() if sys.executable else None
     repo_venv_python = paths.app_root / ".venv" / "bin" / "python"
 
@@ -41,7 +41,7 @@ class KimiAdapter(AgentAdapter):
         }
         relative_path = self.relative_runtime_file("kimi-request.json")
         runtime_files = {relative_path: json.dumps(request, ensure_ascii=False, indent=2)}
-        executable = node.executable or _default_kimi_executable(paths)
+        executable = node.executable or default_kimi_executable(paths)
         command = [
             executable,
             "-m",
