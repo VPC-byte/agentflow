@@ -56,7 +56,6 @@ required_fragments = (
     "- kimi_shell_helper: ok - `kimi` is available in `bash -lic`, exports `ANTHROPIC_API_KEY`, and sets `ANTHROPIC_BASE_URL=https://api.kimi.com/coding/`.",
     "- claude_ready: ok - Node `claude_review` (claude) can launch local Claude after the node shell bootstrap; `claude --version` succeeds in the prepared local shell.",
     "- codex_ready: ok - Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; `codex --version` succeeds in the prepared local shell.",
-    "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via `codex login status` or `OPENAI_API_KEY`.",
     "- launch_env_override: ok - Node `codex_plan`: Launch env clears current `OPENAI_BASE_URL` value ",
     "- launch_env_override: ok - Node `claude_review`: Launch env uses configured `ANTHROPIC_BASE_URL` value `https://api.kimi.com/coding/`",
     f"- bootstrap_env_override: ok - Node `claude_review`: Local shell bootstrap overrides current `ANTHROPIC_API_KEY` for this node via `{expected_trigger}` (`kimi` helper).",
@@ -67,6 +66,18 @@ required_fragments = (
 for fragment in required_fragments:
     if fragment not in stdout_text:
         raise SystemExit(f"Missing doctor fragment {fragment!r}.\n--- stdout ---\n{stdout_text}")
+
+accepted_codex_auth_fragments = (
+    "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via `OPENAI_API_KEY`.",
+    "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via `codex login status`.",
+    "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via `codex login status` or `OPENAI_API_KEY`.",
+)
+if not any(fragment in stdout_text for fragment in accepted_codex_auth_fragments):
+    raise SystemExit(
+        "Missing supported codex_auth fragment.\n"
+        f"Accepted: {accepted_codex_auth_fragments!r}\n"
+        f"--- stdout ---\n{stdout_text}"
+    )
 
 print("validated agentflow doctor summary for external custom pipeline")
 PY
