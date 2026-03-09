@@ -2137,6 +2137,46 @@ nodes:
     assert payload["nodes"][0]["cwd"] == str(home.resolve())
 
 
+def test_inspect_command_json_summary_recommends_shell_bridge_for_relative_login_source_outside_launch_cwd(
+    tmp_path,
+    monkeypatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
+    (home / ".bashrc").write_text("export ANTHROPIC_API_KEY=from-relative-bashrc\n", encoding="utf-8")
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-relative-login-startup-shell-bridge
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: anthropic
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["nodes"][0]["bootstrap"] == "shell=bash, login=true, startup=~/.profile"
+    assert payload["nodes"][0]["warnings"] == [
+        "Bash login startup uses `~/.profile`, but it does not reach `~/.bashrc`."
+    ]
+    recommendation = build_bash_login_shell_bridge_recommendation(home=home, cwd=tmp_path)
+    assert recommendation is not None
+    assert payload["nodes"][0]["shell_bridge"] == recommendation.as_dict()
+
+
 def test_inspect_command_summary_uses_launch_env_for_login_startup_sources(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()

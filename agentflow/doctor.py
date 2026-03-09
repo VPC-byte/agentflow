@@ -14,6 +14,7 @@ from typing import Any
 from agentflow.agents.kimi import default_kimi_executable
 from agentflow.env import merge_env_layers
 from agentflow.local_shell import (
+    _resolve_shell_source_target,
     bash_login_startup_file_statuses,
     summarize_bash_login_startup_file_statuses,
     kimi_shell_init_requires_bash_warning,
@@ -148,28 +149,17 @@ def _iter_shell_source_targets(text: str) -> tuple[str, ...]:
     return tuple(targets)
 
 
-def _resolve_home_shell_source_target(token: str, home: Path) -> Path | None:
-    normalized = token.rstrip(";)")
-    if not normalized:
-        return None
-
+def _resolve_home_shell_source_target(
+    token: str,
+    home: Path,
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> Path | None:
     resolved_home = home.resolve()
-    if normalized == "~":
-        candidate = resolved_home
-    elif normalized.startswith("~/"):
-        candidate = resolved_home / normalized[2:]
-    elif normalized.startswith("$HOME/"):
-        candidate = resolved_home / normalized[6:]
-    elif normalized.startswith("${HOME}/"):
-        candidate = resolved_home / normalized[8:]
-    elif normalized.startswith("$"):
+    candidate = _resolve_shell_source_target(token, home=resolved_home, cwd=cwd, env=env)
+    if candidate is None:
         return None
-    else:
-        raw_path = Path(normalized)
-        candidate = raw_path if raw_path.is_absolute() else resolved_home / raw_path
-
-    candidate = Path(os.path.normpath(str(candidate)))
-
     try:
         candidate.relative_to(resolved_home)
     except ValueError:
@@ -177,7 +167,14 @@ def _resolve_home_shell_source_target(token: str, home: Path) -> Path | None:
     return candidate
 
 
-def _shell_sources_file(text: str, filename: str, home: Path | None = None) -> bool:
+def _shell_sources_file(
+    text: str,
+    filename: str,
+    home: Path | None = None,
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> bool:
     if home is None:
         accepted_targets = {
             f"~/{filename}",
@@ -190,7 +187,7 @@ def _shell_sources_file(text: str, filename: str, home: Path | None = None) -> b
     return any(
         resolved == target
         for token in _iter_shell_source_targets(text)
-        if (resolved := _resolve_home_shell_source_target(token, home)) is not None
+        if (resolved := _resolve_home_shell_source_target(token, home, cwd=cwd, env=env)) is not None
     )
 
 
@@ -1352,6 +1349,9 @@ def _bash_startup_chain_to_bashrc(
     home: Path,
     startup_file: Path,
     seen: frozenset[str] = frozenset(),
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, ...] | None:
     name = _home_relative_shell_path(home, startup_file)
     if name in seen:
@@ -1366,7 +1366,15 @@ def _bash_startup_chain_to_bashrc(
     targets = tuple(
         resolved
         for token in _iter_shell_source_targets(text)
-        if (resolved := _resolve_home_shell_source_target(token, resolved_home)) is not None
+        if (
+            resolved := _resolve_home_shell_source_target(
+                token,
+                resolved_home,
+                cwd=cwd,
+                env=env,
+            )
+        )
+        is not None
     )
     if any(target == bashrc_path for target in targets):
         return (name, ".bashrc")
@@ -1376,13 +1384,19 @@ def _bash_startup_chain_to_bashrc(
         candidate_name = _home_relative_shell_path(resolved_home, candidate)
         if candidate_name in next_seen or candidate == bashrc_path or not candidate.exists():
             continue
-        chain = _bash_startup_chain_to_bashrc(resolved_home, candidate, next_seen)
+        chain = _bash_startup_chain_to_bashrc(resolved_home, candidate, next_seen, cwd=cwd, env=env)
         if chain is not None:
             return (name, *chain)
     return None
 
 
-def _shadowed_bash_startup_chain_to_bashrc(home: Path, active_startup_name: str) -> tuple[str, ...] | None:
+def _shadowed_bash_startup_chain_to_bashrc(
+    home: Path,
+    active_startup_name: str,
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[str, ...] | None:
     seen = frozenset({active_startup_name})
     for filename in _BASH_LOGIN_FILENAMES:
         if filename == active_startup_name:
@@ -1390,7 +1404,7 @@ def _shadowed_bash_startup_chain_to_bashrc(home: Path, active_startup_name: str)
         candidate = home / filename
         if not candidate.exists():
             continue
-        chain = _bash_startup_chain_to_bashrc(home, candidate, seen)
+        chain = _bash_startup_chain_to_bashrc(home, candidate, seen, cwd=cwd, env=env)
         if chain is not None:
             return chain
     return None
@@ -1462,7 +1476,12 @@ def _bash_startup_chain_context(
     return context
 
 
-def _check_bash_login_startup(home: Path) -> DoctorCheck:
+def _check_bash_login_startup(
+    home: Path,
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> DoctorCheck:
     login_file = _bash_login_file(home)
     if login_file is None:
         return DoctorCheck(
@@ -1476,7 +1495,7 @@ def _check_bash_login_startup(home: Path) -> DoctorCheck:
         )
 
     try:
-        chain = _bash_startup_chain_to_bashrc(home, login_file)
+        chain = _bash_startup_chain_to_bashrc(home, login_file, cwd=cwd, env=env)
     except _ShellStartupReadError as exc:
         return DoctorCheck(
             name="bash_login_startup",
@@ -1487,7 +1506,7 @@ def _check_bash_login_startup(home: Path) -> DoctorCheck:
     login_file_clause = _bash_login_file_clause(home, login_file)
     if chain is None:
         try:
-            shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(home, login_file.name)
+            shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(home, login_file.name, cwd=cwd, env=env)
         except _ShellStartupReadError as exc:
             return DoctorCheck(
                 name="bash_login_startup",
@@ -1556,7 +1575,12 @@ def _check_bash_login_startup(home: Path) -> DoctorCheck:
     )
 
 
-def build_bash_login_shell_bridge_recommendation(home: Path | None = None) -> ShellBridgeRecommendation | None:
+def build_bash_login_shell_bridge_recommendation(
+    home: Path | None = None,
+    *,
+    cwd: Path | str | None = None,
+    env: dict[str, str] | None = None,
+) -> ShellBridgeRecommendation | None:
     resolved_home = home or Path.home()
     login_file = _bash_login_file(resolved_home)
     if login_file is None:
@@ -1571,7 +1595,7 @@ def build_bash_login_shell_bridge_recommendation(home: Path | None = None) -> Sh
         )
 
     try:
-        chain = _bash_startup_chain_to_bashrc(resolved_home, login_file)
+        chain = _bash_startup_chain_to_bashrc(resolved_home, login_file, cwd=cwd, env=env)
     except _ShellStartupReadError as exc:
         return ShellBridgeRecommendation(
             target=f"~/{login_file.name}",
@@ -1584,7 +1608,12 @@ def build_bash_login_shell_bridge_recommendation(home: Path | None = None) -> Sh
 
     login_file_clause = _bash_login_file_clause(resolved_home, login_file)
     try:
-        shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(resolved_home, login_file.name)
+        shadowed_chain = _shadowed_bash_startup_chain_to_bashrc(
+            resolved_home,
+            login_file.name,
+            cwd=cwd,
+            env=env,
+        )
     except _ShellStartupReadError as exc:
         return ShellBridgeRecommendation(
             target=f"~/{login_file.name}",

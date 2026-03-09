@@ -248,6 +248,7 @@ def test_make_bundled_kimi_variant_shortcuts_point_to_shipped_examples() -> None
         [
             "make",
             "-n",
+            "smoke-local",
             "inspect-local-shell-init",
             "doctor-local-shell-init",
             "smoke-local-shell-init",
@@ -273,6 +274,7 @@ def test_make_bundled_kimi_variant_shortcuts_point_to_shipped_examples() -> None
         recipe_python = python_bin
 
     assert completed.returncode == 0
+    assert f"{recipe_python} -m agentflow smoke --output summary --show-preflight" in completed.stdout
     assert (
         f"{recipe_python} -m agentflow inspect examples/local-real-agents-kimi-shell-init-smoke.yaml --output summary"
     ) in completed.stdout
@@ -280,7 +282,7 @@ def test_make_bundled_kimi_variant_shortcuts_point_to_shipped_examples() -> None
         f"{recipe_python} -m agentflow doctor examples/local-real-agents-kimi-shell-init-smoke.yaml --output summary"
     ) in completed.stdout
     assert (
-        f"{recipe_python} -m agentflow smoke examples/local-real-agents-kimi-shell-init-smoke.yaml --show-preflight"
+        f"{recipe_python} -m agentflow smoke examples/local-real-agents-kimi-shell-init-smoke.yaml --output summary --show-preflight"
     ) in completed.stdout
     assert (
         f"{recipe_python} -m agentflow run examples/local-real-agents-kimi-shell-init-smoke.yaml --output summary"
@@ -295,7 +297,7 @@ def test_make_bundled_kimi_variant_shortcuts_point_to_shipped_examples() -> None
         f"{recipe_python} -m agentflow doctor examples/local-real-agents-kimi-shell-wrapper-smoke.yaml --output summary"
     ) in completed.stdout
     assert (
-        f"{recipe_python} -m agentflow smoke examples/local-real-agents-kimi-shell-wrapper-smoke.yaml --show-preflight"
+        f"{recipe_python} -m agentflow smoke examples/local-real-agents-kimi-shell-wrapper-smoke.yaml --output summary --show-preflight"
     ) in completed.stdout
     assert (
         f"{recipe_python} -m agentflow run examples/local-real-agents-kimi-shell-wrapper-smoke.yaml --output summary"
@@ -326,6 +328,33 @@ def test_verify_local_kimi_shell_script_requires_kimi_to_export_anthropic_env(tm
     assert completed.returncode == 1
     assert "~/.profile: present" in completed.stdout
     assert "kimi did not export ANTHROPIC_API_KEY" in completed.stderr
+
+
+def test_verify_local_kimi_shell_script_recommends_bridge_for_relative_profile_source_outside_home(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('. .bashrc\n', encoding="utf-8")
+    (home / ".bashrc").write_text(
+        'export PATH="$HOME/bin:$PATH"\n'
+        "kimi() {\n"
+        "  export ANTHROPIC_BASE_URL=https://api.kimi.com/coding/\n"
+        "  export ANTHROPIC_API_KEY=test-kimi-key\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "verify-local-kimi-shell.sh"
+
+    completed = _run_script(script_path, repo_root=repo_root, home=home, OPENAI_API_KEY="")
+
+    assert completed.returncode == 1
+    assert "bash login startup: ~/.profile" in completed.stdout
+    assert "bash login bridge target: ~/.profile" in completed.stdout
+    assert "bash login bridge source: ~/.bashrc" in completed.stdout
+    assert "it does not reference `~/.bashrc`" in completed.stdout
 
 
 def test_verify_local_kimi_shell_script_fails_when_codex_version_fails(tmp_path: Path) -> None:

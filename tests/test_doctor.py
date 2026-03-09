@@ -1084,7 +1084,9 @@ def test_local_smoke_doctor_report_ok_with_absolute_home_bridge(tmp_path: Path, 
     }
 
 
-def test_local_smoke_doctor_report_accepts_relative_bashrc_bridge(tmp_path: Path):
+def test_local_smoke_doctor_report_warns_when_relative_bashrc_bridge_uses_current_cwd_outside_home(
+    tmp_path: Path,
+):
     home = tmp_path / "home"
     home.mkdir()
     (home / ".profile").write_text('. .bashrc\n', encoding="utf-8")
@@ -1094,11 +1096,31 @@ def test_local_smoke_doctor_report_accepts_relative_bashrc_bridge(tmp_path: Path
 
     assert startup_check.as_dict() == {
         "name": "bash_login_startup",
+        "status": "warning",
+        "detail": (
+            "Bash login shells fall back to `~/.profile` because neither `~/.bash_profile` nor `~/.bash_login` "
+            "exists, but it does not reference `~/.bashrc`."
+        ),
+        "context": _startup_context("~/.profile", login_file="~/.profile"),
+    }
+    assert build_bash_login_shell_bridge_recommendation(home) is not None
+
+
+def test_local_smoke_doctor_report_accepts_relative_bashrc_bridge_from_home_cwd(tmp_path: Path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('. .bashrc\n', encoding="utf-8")
+    (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
+
+    startup_check = _check_bash_login_startup(home, cwd=home)
+
+    assert startup_check.as_dict() == {
+        "name": "bash_login_startup",
         "status": "ok",
         "detail": "Bash login shells fall back to `~/.profile` because neither `~/.bash_profile` nor `~/.bash_login` exists, and it references `~/.bashrc`.",
         "context": _startup_context("~/.profile", "~/.bashrc", login_file="~/.profile", bashrc_exists=True),
     }
-    assert build_bash_login_shell_bridge_recommendation(home) is None
+    assert build_bash_login_shell_bridge_recommendation(home, cwd=home) is None
 
 
 def test_local_smoke_doctor_report_accepts_bash_login_bridge(tmp_path: Path):
@@ -2083,7 +2105,7 @@ def test_bash_login_startup_accepts_relative_bashrc_bridge(tmp_path: Path):
     (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
     (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
 
-    startup_check = _check_bash_login_startup(home)
+    startup_check = _check_bash_login_startup(home, cwd=home)
 
     assert startup_check.as_dict() == {
         "name": "bash_login_startup",
@@ -2126,7 +2148,7 @@ def test_shell_bridge_recommendation_is_none_when_relative_profile_bridge_reache
     (home / ".profile").write_text('if [ -f .bashrc ]; then . .bashrc; fi\n', encoding="utf-8")
     (home / ".bashrc").write_text("kimi(){ :; }\n", encoding="utf-8")
 
-    recommendation = build_bash_login_shell_bridge_recommendation(home=home)
+    recommendation = build_bash_login_shell_bridge_recommendation(home=home, cwd=home)
 
     assert recommendation is None
 

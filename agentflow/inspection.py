@@ -554,7 +554,7 @@ def _target_shell_bridge(
         return None
 
     effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
-    recommendation = build_bash_login_shell_bridge_recommendation(home=effective_home)
+    recommendation = build_bash_login_shell_bridge_recommendation(home=effective_home, cwd=cwd, env=launch_env)
     if recommendation is None:
         return None
     return recommendation.as_dict()

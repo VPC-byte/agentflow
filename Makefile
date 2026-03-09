@@ -106,13 +106,13 @@ doctor-local-shell-wrapper:
 	$(PYTHON) -m agentflow doctor examples/local-real-agents-kimi-shell-wrapper-smoke.yaml --output summary
 
 smoke-local:
-	$(PYTHON) -m agentflow smoke --show-preflight
+	$(PYTHON) -m agentflow smoke --output summary --show-preflight
 
 smoke-local-shell-init:
-	$(PYTHON) -m agentflow smoke examples/local-real-agents-kimi-shell-init-smoke.yaml --show-preflight
+	$(PYTHON) -m agentflow smoke examples/local-real-agents-kimi-shell-init-smoke.yaml --output summary --show-preflight
 
 smoke-local-shell-wrapper:
-	$(PYTHON) -m agentflow smoke examples/local-real-agents-kimi-shell-wrapper-smoke.yaml --show-preflight
+	$(PYTHON) -m agentflow smoke examples/local-real-agents-kimi-shell-wrapper-smoke.yaml --output summary --show-preflight
 
 run-local:
 	$(PYTHON) -m agentflow run examples/local-real-agents-kimi-smoke.yaml --output summary
