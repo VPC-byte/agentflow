@@ -6,9 +6,29 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 . "$script_dir/custom-local-kimi-helpers.sh"
 
 python_bin="$(agentflow_repo_python "$repo_root")"
+pipeline_mode="${AGENTFLOW_KIMI_PIPELINE_MODE:-bootstrap}"
+
+case "$pipeline_mode" in
+  bootstrap)
+    pipeline_name="custom-kimi-check-local"
+    pipeline_description="Temporary external real-agent check-local test for local Codex plus Claude-on-Kimi."
+    expected_trigger="target.bootstrap"
+    pipeline_writer="write_custom_local_kimi_pipeline"
+    ;;
+  shell-init)
+    pipeline_name="custom-kimi-shell-init-check-local"
+    pipeline_description="Temporary external real-agent check-local test for local Codex plus Claude-on-Kimi via shell_init."
+    expected_trigger="target.shell_init"
+    pipeline_writer="write_custom_local_kimi_shell_init_pipeline"
+    ;;
+  *)
+    printf 'unsupported AGENTFLOW_KIMI_PIPELINE_MODE: %s\n' "$pipeline_mode" >&2
+    exit 1
+    ;;
+esac
 
 tmpdir="$(mktemp -d)"
-pipeline_path="$tmpdir/custom-kimi-check-local.yaml"
+pipeline_path="$tmpdir/${pipeline_name}.yaml"
 stdout_path="$tmpdir/check-local.stdout"
 stderr_path="$tmpdir/check-local.stderr"
 
@@ -33,10 +53,10 @@ cleanup() {
 
 trap cleanup EXIT
 
-write_custom_local_kimi_pipeline \
+"$pipeline_writer" \
   "$pipeline_path" \
-  "custom-kimi-check-local" \
-  "Temporary external real-agent check-local test for local Codex plus Claude-on-Kimi."
+  "$pipeline_name" \
+  "$pipeline_description"
 
 printf "custom pipeline path: %s\n" "$pipeline_path"
 
@@ -45,7 +65,7 @@ printf "custom pipeline path: %s\n" "$pipeline_path"
   "$python_bin" -m agentflow check-local "$pipeline_path" --output json-summary >"$stdout_path" 2>"$stderr_path"
 )
 
-STDOUT_PATH="$stdout_path" STDERR_PATH="$stderr_path" "$python_bin" - <<'PY'
+STDOUT_PATH="$stdout_path" STDERR_PATH="$stderr_path" PIPELINE_NAME="$pipeline_name" EXPECTED_TRIGGER="$expected_trigger" "$python_bin" - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -54,13 +74,15 @@ stdout_path = Path(os.environ["STDOUT_PATH"])
 stderr_path = Path(os.environ["STDERR_PATH"])
 stdout_text = stdout_path.read_text(encoding="utf-8")
 stderr_text = stderr_path.read_text(encoding="utf-8")
+expected_pipeline_name = os.environ["PIPELINE_NAME"]
+expected_trigger = os.environ["EXPECTED_TRIGGER"]
 
 run_payload = json.loads(stdout_text)
 if run_payload.get("status") != "completed":
     raise SystemExit(f"Unexpected check-local run status in stdout JSON: {run_payload}")
 
 pipeline = run_payload.get("pipeline") or {}
-if pipeline.get("name") != "custom-kimi-check-local":
+if pipeline.get("name") != expected_pipeline_name:
     raise SystemExit(f"Unexpected pipeline summary in stdout JSON: {run_payload}")
 
 nodes = {node.get("id"): node for node in run_payload.get("nodes", [])}
@@ -90,6 +112,17 @@ missing_checks = sorted(required_checks - present_checks)
 if missing_checks:
     raise SystemExit(f"Missing preflight checks in stderr JSON: {missing_checks}\n--- stderr ---\n{stderr_text}")
 
+bootstrap_override_details = [
+    check.get("detail")
+    for check in checks
+    if isinstance(check, dict) and check.get("name") == "bootstrap_env_override"
+]
+expected_override_fragment = f"via `{expected_trigger}` (`kimi` helper)."
+if not any(isinstance(detail, str) and expected_override_fragment in detail for detail in bootstrap_override_details):
+    raise SystemExit(
+        f"Missing bootstrap override detail {expected_override_fragment!r} in stderr JSON.\n--- stderr ---\n{stderr_text}"
+    )
+
 auto_preflight = (preflight_payload.get("pipeline") or {}).get("auto_preflight") or {}
 if auto_preflight.get("enabled") is not True:
     raise SystemExit(f"Expected auto preflight to be enabled in stderr JSON: {preflight_payload}")
@@ -97,8 +130,8 @@ if auto_preflight.get("reason") != "local Codex/Claude/Kimi nodes use a `kimi` s
     raise SystemExit(f"Unexpected auto preflight reason in stderr JSON: {preflight_payload}")
 
 expected_matches = {
-    "codex_plan (codex) via `target.bootstrap`",
-    "claude_review (claude) via `target.bootstrap`",
+    f"codex_plan (codex) via `{expected_trigger}`",
+    f"claude_review (claude) via `{expected_trigger}`",
 }
 if set(auto_preflight.get("match_summary") or []) != expected_matches:
     raise SystemExit(f"Unexpected auto preflight matches in stderr JSON: {preflight_payload}")

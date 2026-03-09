@@ -52,3 +52,42 @@ nodes:
         value: claude ok
 YAML
 }
+
+write_custom_local_kimi_shell_init_pipeline() {
+  local pipeline_path="$1"
+  local pipeline_name="$2"
+  local pipeline_description="$3"
+
+  cat >"$pipeline_path" <<YAML
+name: $pipeline_name
+description: $pipeline_description
+working_dir: .
+concurrency: 2
+local_target_defaults:
+  shell: bash
+  shell_login: true
+  shell_interactive: true
+  shell_init: kimi
+nodes:
+  - id: codex_plan
+    agent: codex
+    env:
+      OPENAI_BASE_URL: ""
+    prompt: |
+      Reply with exactly: codex ok
+    timeout_seconds: 180
+    success_criteria:
+      - kind: output_contains
+        value: codex ok
+
+  - id: claude_review
+    agent: claude
+    provider: kimi
+    prompt: |
+      Reply with exactly: claude ok
+    timeout_seconds: 180
+    success_criteria:
+      - kind: output_contains
+        value: claude ok
+YAML
+}

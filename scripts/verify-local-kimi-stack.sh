@@ -26,4 +26,5 @@ run_step "External custom doctor" bash "$script_dir/verify-custom-local-kimi-doc
 run_step "External custom inspect" bash "$script_dir/verify-custom-local-kimi-inspect.sh"
 run_step "Bundled check-local" "$python_bin" -m agentflow check-local --output summary
 run_step "External custom check-local" bash "$script_dir/verify-custom-local-kimi-pipeline.sh"
+run_step "External custom check-local (shell_init)" bash "$script_dir/verify-custom-local-kimi-shell-init.sh"
 run_step "External custom run" bash "$script_dir/verify-custom-local-kimi-run.sh"
