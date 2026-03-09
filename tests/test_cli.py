@@ -207,6 +207,11 @@ nodes:
 
 
 def test_inspect_command_outputs_launch_summary(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
         """name: inspect-demo
@@ -243,7 +248,7 @@ nodes:
     assert "- plan [codex/local]" in result.stdout
     assert "Model: gpt-5" in result.stdout
     assert "Mode: tools=read_only, capture=final" in result.stdout
-    assert "Bootstrap: shell=bash, login=true, interactive=true, init=kimi" in result.stdout
+    assert "Bootstrap: shell=bash, login=true, startup=~/.profile, interactive=true, init=kimi" in result.stdout
     assert "Launch: bash -l -i -c 'kimi && eval \"$AGENTFLOW_TARGET_COMMAND\"'" in result.stdout
     assert "Runtime files: codex_home/config.toml" in result.stdout
     assert "Prompt: Review this: <inspect placeholder for nodes.plan.output>" in result.stdout
@@ -916,7 +921,12 @@ nodes:
     }
 
 
-def test_inspect_command_supports_shell_init_command_lists(tmp_path):
+def test_inspect_command_supports_shell_init_command_lists(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".profile").write_text('if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n', encoding="utf-8")
+    monkeypatch.setattr("agentflow.local_shell.Path.home", lambda: home)
+
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
         """name: inspect-shell-init-list
@@ -941,7 +951,10 @@ nodes:
 
     assert result.exit_code == 0
     assert "Auto preflight matches: review (claude) via `target.shell_init`" in result.stdout
-    assert "Bootstrap: shell=bash, login=true, interactive=true, init=command -v kimi >/dev/null 2>&1 && kimi" in result.stdout
+    assert (
+        "Bootstrap: shell=bash, login=true, startup=~/.profile, interactive=true, "
+        "init=command -v kimi >/dev/null 2>&1 && kimi"
+    ) in result.stdout
 
 
 def test_inspect_command_ignores_kimi_probe_commands_in_auto_preflight(tmp_path):
