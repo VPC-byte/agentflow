@@ -9442,6 +9442,70 @@ nodes:
     }
 
 
+def test_run_auto_preflight_fails_closed_when_launch_inspection_errors(tmp_path, monkeypatch):
+    _disable_local_readiness_probes(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_run_pipeline",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("run should not start")),
+    )
+    monkeypatch.setattr(
+        agentflow.inspection,
+        "build_launch_inspection",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    custom_home = tmp_path / "custom-home"
+    custom_home.mkdir()
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        f"""name: run-shell-startup-auth-inspection-error
+working_dir: .
+nodes:
+  - id: review
+    agent: claude
+    provider: anthropic
+    prompt: hi
+    target:
+      kind: local
+      shell: "env HOME={custom_home} bash"
+      shell_login: true
+      shell_interactive: true
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["run", str(pipeline_path), "--output", "json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "status": "failed",
+        "checks": [
+            {
+                "name": "launch_inspection",
+                "status": "failed",
+                "detail": (
+                    "AgentFlow could not inspect the resolved local launch plan for preflight safety checks: "
+                    "RuntimeError: boom."
+                ),
+            }
+        ],
+        "pipeline": {
+            "auto_preflight": {
+                "enabled": True,
+                "reason": (
+                    "AgentFlow could not inspect local launch details while deciding whether shell-startup "
+                    "auth preflight is required."
+                ),
+                "matches": [],
+                "match_summary": [],
+            }
+        },
+    }
+
+
 def test_doctor_with_pipeline_path_uses_pipeline_shell_bridge_for_custom_home(tmp_path, monkeypatch):
     host_home = tmp_path / "host-home"
     host_home.mkdir()

@@ -516,9 +516,27 @@ def _pipeline_launch_inspection_error(pipeline: object | None) -> str | None:
     return _PIPELINE_LAUNCH_INSPECTION_ERRORS.get(id(pipeline))
 
 
+def _pipeline_has_local_preflight_relevant_nodes(pipeline: object | None) -> bool:
+    if pipeline is None:
+        return False
+
+    for node in getattr(pipeline, "nodes", None) or []:
+        agent = _status_value(getattr(node, "agent", None)).lower()
+        if agent not in _KIMI_SHELL_PREFLIGHT_AGENTS:
+            continue
+        target = getattr(node, "target", None)
+        if getattr(target, "kind", None) == "local":
+            return True
+    return False
+
+
+def _pipeline_launch_inspection_failed_for_preflight(pipeline: object | None) -> bool:
+    return bool(_pipeline_launch_inspection_error(pipeline)) and _pipeline_has_local_preflight_relevant_nodes(pipeline)
+
+
 def _pipeline_launch_inspection_failure_checks(pipeline: object | None) -> list[DoctorCheck]:
     detail = _pipeline_launch_inspection_error(pipeline)
-    if not detail:
+    if not detail or not _pipeline_has_local_preflight_relevant_nodes(pipeline):
         return []
     return [
         DoctorCheck(
@@ -1000,10 +1018,12 @@ def _pipeline_uses_kimi_smoke_preflight(pipeline: object) -> bool:
 
 
 def _pipeline_uses_auto_preflight(pipeline: object) -> bool:
-    return bool(_pipeline_auto_preflight_matches(pipeline))
+    return bool(_pipeline_auto_preflight_matches(pipeline)) or _pipeline_launch_inspection_failed_for_preflight(pipeline)
 
 
-def _auto_preflight_reason_for_matches(matches: list[dict[str, str]]) -> str | None:
+def _auto_preflight_reason_for_matches(matches: list[dict[str, str]], *, pipeline: object | None = None) -> str | None:
+    if _pipeline_launch_inspection_failed_for_preflight(pipeline):
+        return "AgentFlow could not inspect local launch details while deciding whether shell-startup auth preflight is required."
     if any(match.get("trigger") == "target.bash_startup" for match in matches):
         return "local Codex/Claude/Kimi nodes depend on shell startup for auth."
     if matches:
@@ -1390,7 +1410,7 @@ def _auto_smoke_preflight_reason(path: str, pipeline: object) -> str | None:
         return "path matches the bundled real-agent smoke pipeline."
     if _pipeline_uses_kimi_smoke_preflight(pipeline):
         return "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap."
-    return _auto_preflight_reason_for_matches(_pipeline_auto_preflight_matches(pipeline))
+    return _auto_preflight_reason_for_matches(_pipeline_auto_preflight_matches(pipeline), pipeline=pipeline)
 
 
 def _auto_smoke_preflight_metadata(path: str, pipeline: object) -> dict[str, object]:
@@ -1401,7 +1421,7 @@ def _auto_smoke_preflight_metadata(path: str, pipeline: object) -> dict[str, obj
         if _path_matches_bundled_smoke(path)
         else "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap."
         if _pipeline_uses_kimi_smoke_preflight(pipeline)
-        else _auto_preflight_reason_for_matches(matches)
+        else _auto_preflight_reason_for_matches(matches, pipeline=pipeline)
     )
     if reason is not None:
         return {
