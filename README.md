@@ -256,6 +256,7 @@ target:
 ```
 
 This expands to `shell: bash`, `shell_login: true`, `shell_interactive: true`, and `shell_init: ["command -v kimi >/dev/null 2>&1", "kimi"]`, then launches the prepared agent command. `shell_init` still accepts either a single command or a list of commands when you need the lower-level form; list entries are joined with `&&` so bootstrap failures still stop the wrapped agent launch. When you combine `bootstrap: kimi` with extra `shell_init` commands, AgentFlow now keeps those extra commands first and still appends the Kimi helper automatically, so node-specific bootstrap tweaks do not silently drop the shared Kimi setup.
+`agentflow validate` also treats `bootstrap: kimi` as a contract: if later overrides switch the node away from bash or disable interactive bash startup, validation now fails early instead of deferring that contradiction to inspect or preflight. If you need a different shell shape, drop `target.bootstrap` and configure the wrapper explicitly.
 
 When most local nodes share the same shell bootstrap, move that block to top-level `local_target_defaults` and only override the nodes that differ:
 

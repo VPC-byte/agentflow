@@ -216,6 +216,32 @@ nodes:
     assert "Traceback" not in result.stderr
 
 
+def test_validate_rejects_incompatible_kimi_bootstrap_shorthand(tmp_path):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: cli-invalid-kimi-bootstrap
+working_dir: .
+nodes:
+  - id: alpha
+    agent: claude
+    prompt: hi
+    target:
+      kind: local
+      bootstrap: kimi
+      shell: sh
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["validate", str(pipeline_path)])
+
+    assert result.exit_code == 1
+    assert f"Failed to load pipeline `{pipeline_path}`:" in result.stderr
+    assert "`target.bootstrap: kimi` requires bash-style shell bootstrap" in result.stderr
+    assert "`target.shell` resolves to `sh`" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_inspect_command_outputs_launch_summary(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
