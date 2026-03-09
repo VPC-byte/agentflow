@@ -4929,6 +4929,58 @@ def test_smoke_auto_runs_preflight_for_custom_pipeline_with_kimi_shell_init(monk
     assert captured["wait_timeout"] is None
 
 
+def test_smoke_show_preflight_reports_pipeline_specific_readiness_for_custom_kimi_pipeline(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeOrchestrator:
+        async def submit(self, pipeline: object):
+            captured["submitted_pipeline"] = pipeline
+            return SimpleNamespace(id="smoke-custom-show-preflight")
+
+        async def wait(self, run_id: str, timeout: float | None = None):
+            captured["wait_run_id"] = run_id
+            captured["wait_timeout"] = timeout
+            return _completed_run(run_id, pipeline_name="custom-kimi-smoke")
+
+    _reject_bundled_smoke_doctor(monkeypatch)
+    monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
+    monkeypatch.setattr(
+        agentflow.cli,
+        "_build_runtime",
+        lambda runs_dir, max_concurrent_runs: (SimpleNamespace(run_dir=lambda run_id: Path(runs_dir) / run_id), FakeOrchestrator()),
+    )
+    fake_pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="codex_plan",
+                agent=SimpleNamespace(value="codex"),
+                target=SimpleNamespace(kind="local", shell="bash", shell_interactive=True, shell_init="kimi"),
+            )
+        ]
+    )
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", _capture_pipeline_loader(captured, fake_pipeline))
+
+    result = runner.invoke(app, ["smoke", "custom-smoke.yaml", "--output", "summary", "--show-preflight"])
+
+    assert result.exit_code == 0
+    assert result.stderr == (
+        "Doctor: ok\n"
+        "- bash_login_startup: ok - startup ready\n"
+        "- kimi_shell_helper: ok - ready\n"
+        "- codex_ready: ok - Node `codex_plan` (codex) can launch local Codex after the node shell bootstrap; "
+        "`codex --version` succeeds in the prepared local shell.\n"
+        "- codex_auth: ok - Node `codex_plan` (codex) can authenticate local Codex after the node shell bootstrap via "
+        "`codex login status` or `OPENAI_API_KEY`.\n"
+        "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.\n"
+        "Pipeline auto preflight matches: codex_plan (codex) via `target.shell_init`\n"
+    )
+    assert "Run smoke-custom-show-preflight: completed" in result.stdout
+    assert captured["loaded_path"] == "custom-smoke.yaml"
+    assert captured["submitted_pipeline"] is fake_pipeline
+    assert captured["wait_run_id"] == "smoke-custom-show-preflight"
+    assert captured["wait_timeout"] is None
+
+
 def test_smoke_failed_preflight_for_custom_kimi_pipeline_includes_shell_bridge_when_available(monkeypatch):
     monkeypatch.setattr(
         agentflow.cli,
