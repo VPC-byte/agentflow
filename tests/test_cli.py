@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 import agentflow.cli
+import agentflow.inspection
 import agentflow.local_shell
 from agentflow.agents.kimi import default_kimi_executable
 from agentflow.cli import app, _render_doctor_summary
@@ -338,6 +339,8 @@ def test_render_doctor_summary_appends_bash_startup_summary_suffix():
 
 
 def test_doctor_command_json_preserves_bash_startup_context(monkeypatch):
+    monkeypatch.setattr(agentflow.cli, "_load_pipeline", lambda path: SimpleNamespace(nodes=[]))
+    monkeypatch.setattr(agentflow.cli, "_pipeline_launch_inspection_nodes", lambda pipeline: [])
     monkeypatch.setattr(
         agentflow.cli,
         "build_local_smoke_doctor_report",
@@ -369,28 +372,25 @@ def test_doctor_command_json_preserves_bash_startup_context(monkeypatch):
     result = runner.invoke(app, ["doctor", "--output", "json"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "ok"
+    assert next(check for check in payload["checks"] if check["name"] == "bash_login_startup") == {
+        "name": "bash_login_startup",
         "status": "ok",
-        "checks": [
-            {
-                "name": "bash_login_startup",
-                "status": "ok",
-                "detail": "startup ready",
-                "context": {
-                    "login_file": "~/.profile",
-                    "startup_chain": ["~/.profile", "~/.bashrc"],
-                    "startup_summary": "~/.profile -> ~/.bashrc",
-                    "startup_files": {
-                        "~/.bash_profile": "missing",
-                        "~/.bash_login": "missing",
-                        "~/.profile": "present",
-                    },
-                    "startup_files_summary": "~/.bash_profile=missing, ~/.bash_login=missing, ~/.profile=present",
-                    "bashrc_reachable": True,
-                    "bashrc_exists": True,
-                },
-            }
-        ],
+        "detail": "startup ready",
+        "context": {
+            "login_file": "~/.profile",
+            "startup_chain": ["~/.profile", "~/.bashrc"],
+            "startup_summary": "~/.profile -> ~/.bashrc",
+            "startup_files": {
+                "~/.bash_profile": "missing",
+                "~/.bash_login": "missing",
+                "~/.profile": "present",
+            },
+            "startup_files_summary": "~/.bash_profile=missing, ~/.bash_login=missing, ~/.profile=present",
+            "bashrc_reachable": True,
+            "bashrc_exists": True,
+        },
     }
 
 
@@ -2980,9 +2980,19 @@ nodes:
     monkeypatch.setattr(agentflow.cli, "build_local_kimi_bootstrap_doctor_report", lambda: _custom_kimi_preflight_report())
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(
+        agentflow.cli,
+        "probe_target_bash_startup_env_var",
+        lambda *args, **kwargs: agentflow.local_shell.BashStartupEnvProbeResult(exported=False),
+    )
+    monkeypatch.setattr(agentflow.inspection, "target_bash_startup_exports_env_var", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
         subprocess,
         "run",
-        lambda *args, **kwargs: pytest.fail("codex auth probe should not run when the kimi shell bootstrap already warns"),
+        lambda *args, **kwargs: (
+            pytest.fail("codex auth probe should not run when the kimi shell bootstrap already warns")
+            if "codex login status" in str((kwargs.get("env") or {}).get("AGENTFLOW_TARGET_COMMAND", ""))
+            else subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+        ),
     )
     monkeypatch.setattr(
         agentflow.cli,
@@ -8210,6 +8220,7 @@ nodes:
 """,
         encoding="utf-8",
     )
+    _disable_local_readiness_probes(monkeypatch)
     monkeypatch.setattr(agentflow.cli, "build_local_smoke_doctor_report", lambda: _doctor_report())
     monkeypatch.setattr(agentflow.cli, "default_smoke_pipeline_path", lambda: str(pipeline_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
@@ -8575,6 +8586,7 @@ import builtins
 import importlib
 import json
 import os
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 from agentflow.doctor import DoctorCheck, DoctorReport
@@ -8594,6 +8606,8 @@ cli_module.build_local_smoke_doctor_report = lambda: DoctorReport(
     status=\"ok\",
     checks=[DoctorCheck(name=\"kimi_shell_helper\", status=\"ok\", detail=\"ready\")],
 )
+cli_module._load_pipeline = lambda path: SimpleNamespace(nodes=[])
+cli_module._pipeline_launch_inspection_nodes = lambda pipeline: []
 result = CliRunner().invoke(cli_module.app, [\"doctor\"])
 print(json.dumps({\"exit_code\": result.exit_code, \"stdout\": result.stdout}))
 """
