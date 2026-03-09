@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agentflow.doctor import (
+    _check_claude_executable,
     _check_bash_login_startup,
     _should_probe_local_claude,
     build_bash_login_shell_bridge_recommendation,
@@ -178,6 +179,46 @@ def test_local_smoke_doctor_report_includes_host_cli_versions(tmp_path: Path, mo
         "status": "ok",
         "detail": "Found `claude` at `/tmp/claude` (version `2.1.52 (Claude Code)`).",
         "context": {"path": "/tmp/claude", "version": "2.1.52 (Claude Code)"},
+    }
+
+
+def test_check_claude_executable_warns_when_login_shell_provides_claude(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+
+    monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: None)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("agentflow.doctor.subprocess.run", fake_run)
+
+    check = _check_claude_executable(home)
+
+    assert check.as_dict() == {
+        "name": "claude",
+        "status": "warning",
+        "detail": "`claude` is not on PATH outside the bundled smoke login shell; `bash -lic` must provide it for the local smoke pipeline.",
+    }
+
+
+def test_check_claude_executable_fails_when_login_shell_cannot_find_claude(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+
+    monkeypatch.setattr("agentflow.doctor.shutil.which", lambda name: None)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args[0], returncode=12, stdout="", stderr="")
+
+    monkeypatch.setattr("agentflow.doctor.subprocess.run", fake_run)
+
+    check = _check_claude_executable(home)
+
+    assert check.as_dict() == {
+        "name": "claude",
+        "status": "failed",
+        "detail": "`claude` is not on PATH and is unavailable in `bash -lic`.",
     }
 
 
