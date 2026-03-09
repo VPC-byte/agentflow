@@ -12,6 +12,8 @@ local_target_defaults:
 nodes:
   - id: codex_plan
     agent: codex
+    env:
+      OPENAI_BASE_URL: ""
     prompt: |
       Reply with exactly: codex ok
     timeout_seconds: 180

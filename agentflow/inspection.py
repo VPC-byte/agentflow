@@ -501,7 +501,7 @@ def _launch_env_inheritance_details(
     if not current_value:
         return []
 
-    if _has_nonempty_env_value(launch_env, key):
+    if key in launch_env:
         return []
 
     if _local_bootstrap_sets_env_var(node.target, key):

@@ -489,6 +489,30 @@ nodes:
     ]
 
 
+def test_inspect_command_summary_skips_current_base_url_inheritance_when_node_env_clears_it(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-base-url-cleared
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    prompt: hi
+    env:
+      OPENAI_BASE_URL: ""
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://oai-relay.ctf.so/openai")
+
+    result = runner.invoke(app, ["inspect", str(pipeline_path), "--output", "json-summary"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert "launch_env_inheritances" not in payload["nodes"][0]
+    assert not payload["nodes"][0].get("warnings")
+
+
 def test_inspect_command_summary_skips_current_base_url_inheritance_for_container_targets(tmp_path, monkeypatch):
     pipeline_path = tmp_path / "pipeline.yaml"
     pipeline_path.write_text(
@@ -4819,6 +4843,33 @@ nodes:
     assert result.stdout == (
         "Doctor: warning\n"
         "- launch_env_inheritance: warning - Node `review`: Launch inherits current `ANTHROPIC_BASE_URL` value `https://open.bigmodel.cn/api/anthropic`; configure `provider` or `node.env` explicitly if you want Claude routing pinned for this node.\n"
+        "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
+    )
+
+
+def test_doctor_with_pipeline_path_skips_current_base_url_inheritance_when_node_env_clears_it(tmp_path, monkeypatch):
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: doctor-base-url-cleared
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    prompt: hi
+    env:
+      OPENAI_BASE_URL: ""
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(agentflow.cli, "build_pipeline_local_codex_readiness_checks", lambda pipeline: [])
+    monkeypatch.setattr(agentflow.cli, "build_pipeline_local_codex_auth_checks", lambda pipeline: [])
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://oai-relay.ctf.so/openai")
+
+    result = runner.invoke(app, ["doctor", str(pipeline_path), "--output", "summary"])
+
+    assert result.exit_code == 0
+    assert result.stdout == (
+        "Doctor: ok\n"
         "Pipeline auto preflight: disabled - path does not match the bundled smoke pipeline and no local Codex/Claude/Kimi node uses `kimi` bootstrap.\n"
     )
 
