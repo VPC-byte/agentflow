@@ -7111,7 +7111,8 @@ def test_doctor_with_pipeline_path_accepts_kimi_api_key_from_node_env(monkeypatc
     assert result.stdout == (
         "Doctor: ok\n"
         "- kimi_ready: ok - Node `kimi_review` (kimi) can launch the local Kimi bridge after the node shell bootstrap; "
-        f"`{expected_python} -c 'import agentflow.remote.kimi_bridge'` succeeds in the prepared local shell.\n"
+        f"`{expected_python} -c 'import agentflow.remote.kimi_bridge'` succeeds in the prepared local shell "
+        "using the repo-local `.venv` Python by default.\n"
         "Pipeline auto preflight: enabled - local Kimi-backed nodes require pipeline-specific readiness checks.\n"
         "Pipeline auto preflight matches: kimi_review (kimi) via `agent`\n"
     )

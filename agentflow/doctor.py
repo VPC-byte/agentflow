@@ -432,18 +432,24 @@ def _local_claude_ready_ok_check_detail(node_id: str, executable: str) -> str:
     )
 
 
-def _local_kimi_ready_check_detail(node_id: str, probe_command: str) -> str:
-    return (
+def _local_kimi_ready_check_detail(node_id: str, probe_command: str, execution_note: str | None = None) -> str:
+    detail = (
         f"Node `{node_id}` (kimi) cannot launch the local Kimi bridge after the node shell bootstrap; "
-        f"`{probe_command}` fails in the prepared local shell."
+        f"`{probe_command}` fails in the prepared local shell"
     )
+    if execution_note:
+        detail += f" {execution_note}"
+    return detail + "."
 
 
-def _local_kimi_ready_ok_check_detail(node_id: str, probe_command: str) -> str:
-    return (
+def _local_kimi_ready_ok_check_detail(node_id: str, probe_command: str, execution_note: str | None = None) -> str:
+    detail = (
         f"Node `{node_id}` (kimi) can launch the local Kimi bridge after the node shell bootstrap; "
-        f"`{probe_command}` succeeds in the prepared local shell."
+        f"`{probe_command}` succeeds in the prepared local shell"
     )
+    if execution_note:
+        detail += f" {execution_note}"
+    return detail + "."
 
 
 def _local_probe_timeout_detail(node_id: str, agent: str, command_text: str, timeout_seconds: float) -> str:
@@ -642,6 +648,26 @@ def _prepared_kimi_readiness_execution(
     return prepared, paths, shlex.join(probe_command)
 
 
+def _kimi_probe_execution_note(node: object, executable: str, paths: object) -> str | None:
+    if str(_object_value(node, "executable") or "").strip():
+        return None
+
+    app_root = _object_value(paths, "app_root")
+    if not isinstance(app_root, Path):
+        return None
+    repo_venv_python = app_root / ".venv" / "bin" / "python"
+
+    try:
+        resolved_executable = Path(executable).expanduser().resolve(strict=False)
+        resolved_repo_python = repo_venv_python.expanduser().resolve(strict=False)
+    except OSError:
+        return None
+
+    if resolved_executable != resolved_repo_python:
+        return None
+    return "using the repo-local `.venv` Python by default"
+
+
 def _can_authenticate_local_codex(node: object, pipeline: object | None = None) -> tuple[bool, str | None]:
     prepared_with_paths = _prepared_codex_auth_execution(node, pipeline)
     if prepared_with_paths is None:
@@ -759,12 +785,13 @@ def _can_launch_local_claude(node: object, pipeline: object | None = None) -> tu
     return result.returncode == 0, executable, None
 
 
-def _can_launch_local_kimi(node: object, pipeline: object | None = None) -> tuple[bool, str | None, str | None]:
+def _can_launch_local_kimi(node: object, pipeline: object | None = None) -> tuple[bool, str | None, str | None, str | None]:
     prepared_with_paths = _prepared_kimi_readiness_execution(node, pipeline)
     if prepared_with_paths is None:
-        return True, None, None
+        return True, None, None, None
 
     prepared, paths, probe_command = prepared_with_paths
+    execution_note = _kimi_probe_execution_note(node, str(prepared.command[0]), paths)
 
     try:
         launch_plan = LocalRunner().plan_execution(
@@ -773,7 +800,7 @@ def _can_launch_local_kimi(node: object, pipeline: object | None = None) -> tupl
             paths,
         )
     except Exception:
-        return False, probe_command, None
+        return False, probe_command, execution_note, None
 
     env = os.environ.copy()
     env.update(launch_plan.env)
@@ -787,15 +814,15 @@ def _can_launch_local_kimi(node: object, pipeline: object | None = None) -> tupl
             text=True,
         )
     except OSError:
-        return False, probe_command, None
+        return False, probe_command, execution_note, None
     except _DoctorSubprocessTimeout as exc:
-        return False, probe_command, _local_probe_timeout_detail(
+        return False, probe_command, execution_note, _local_probe_timeout_detail(
             str(_object_value(node, "id", "kimi")),
             AgentKind.KIMI.value,
             exc.command_text,
             exc.timeout_seconds,
         )
-    return result.returncode == 0, probe_command, None
+    return result.returncode == 0, probe_command, execution_note, None
 
 
 def build_pipeline_local_claude_readiness_checks(pipeline: object) -> list[DoctorCheck]:
@@ -848,7 +875,7 @@ def build_pipeline_local_kimi_readiness_checks(pipeline: object) -> list[DoctorC
         if agent != AgentKind.KIMI.value:
             continue
 
-        ready, probe_command, failure_detail = _can_launch_local_kimi(node, pipeline)
+        ready, probe_command, execution_note, failure_detail = _can_launch_local_kimi(node, pipeline)
         if ready:
             continue
 
@@ -858,7 +885,11 @@ def build_pipeline_local_kimi_readiness_checks(pipeline: object) -> list[DoctorC
                 name="kimi_ready",
                 status="failed",
                 detail=failure_detail
-                or _local_kimi_ready_check_detail(node_id, probe_command or "python -c 'import agentflow.remote.kimi_bridge'"),
+                or _local_kimi_ready_check_detail(
+                    node_id,
+                    probe_command or "python -c 'import agentflow.remote.kimi_bridge'",
+                    execution_note,
+                ),
             )
         )
     return checks
@@ -870,7 +901,7 @@ def build_pipeline_local_kimi_readiness_info_checks(pipeline: object) -> list[Do
         if _prepared_kimi_readiness_execution(node, pipeline) is None:
             continue
 
-        ready, probe_command, failure_detail = _can_launch_local_kimi(node, pipeline)
+        ready, probe_command, execution_note, failure_detail = _can_launch_local_kimi(node, pipeline)
         if not ready:
             continue
 
@@ -883,6 +914,7 @@ def build_pipeline_local_kimi_readiness_info_checks(pipeline: object) -> list[Do
                 or _local_kimi_ready_ok_check_detail(
                     node_id,
                     probe_command or "python -c 'import agentflow.remote.kimi_bridge'",
+                    execution_note,
                 ),
             )
         )

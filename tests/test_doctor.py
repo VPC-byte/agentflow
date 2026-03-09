@@ -21,6 +21,7 @@ from agentflow.doctor import (
     build_pipeline_local_codex_readiness_checks,
     build_pipeline_local_codex_readiness_info_checks,
     build_pipeline_local_kimi_readiness_checks,
+    build_pipeline_local_kimi_readiness_info_checks,
 )
 from agentflow.prepared import ExecutionPaths
 from agentflow.specs import ProviderConfig
@@ -226,6 +227,53 @@ def test_prepared_kimi_readiness_execution_prefers_repo_venv_python(monkeypatch,
     assert prepared_paths == paths
     assert prepared.command == [str(repo_python), "-c", "import agentflow.remote.kimi_bridge"]
     assert probe_command == f"{repo_python} -c 'import agentflow.remote.kimi_bridge'"
+
+
+def test_kimi_readiness_info_reports_repo_venv_python(monkeypatch, tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    repo_python = repo_root / ".venv" / "bin" / "python"
+    repo_python.parent.mkdir(parents=True)
+    repo_python.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+    paths = ExecutionPaths(
+        host_workdir=tmp_path,
+        host_runtime_dir=tmp_path / ".runtime",
+        target_workdir=str(tmp_path),
+        target_runtime_dir=str(tmp_path / ".runtime"),
+        app_root=repo_root,
+    )
+    pipeline = SimpleNamespace(
+        nodes=[
+            SimpleNamespace(
+                id="kimi_review",
+                agent=SimpleNamespace(value="kimi"),
+                provider=None,
+                env={"KIMI_API_KEY": "inline-secret"},
+                executable=None,
+                target=SimpleNamespace(kind="local", shell=None, shell_login=False, shell_interactive=False, shell_init=None, cwd=None),
+            )
+        ],
+        working_path=tmp_path,
+    )
+
+    monkeypatch.setattr("agentflow.doctor.build_execution_paths", lambda **kwargs: paths)
+    monkeypatch.setattr("agentflow.agents.kimi.sys.executable", "/usr/bin/python3")
+    monkeypatch.setattr(
+        "agentflow.doctor.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args=args[0], returncode=0, stdout="", stderr=""),
+    )
+
+    assert [check.as_dict() for check in build_pipeline_local_kimi_readiness_info_checks(pipeline)] == [
+        {
+            "name": "kimi_ready",
+            "status": "ok",
+            "detail": (
+                "Node `kimi_review` (kimi) can launch the local Kimi bridge after the node shell bootstrap; "
+                f"`{repo_python} -c 'import agentflow.remote.kimi_bridge'` succeeds in the prepared local shell "
+                "using the repo-local `.venv` Python by default."
+            ),
+        }
+    ]
 
 
 def test_local_smoke_doctor_report_ok_with_profile_bridge(tmp_path: Path, monkeypatch):
