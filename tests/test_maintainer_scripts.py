@@ -146,6 +146,79 @@ def test_verify_local_kimi_claude_live_script_reports_success(tmp_path: Path) ->
     assert completed.stderr == ""
 
 
+def test_verify_local_kimi_claude_live_script_ignores_ambient_anthropic_env(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    _write_fake_shell_home(
+        home,
+        kimi_body=(
+            "export ANTHROPIC_BASE_URL=https://api.kimi.com/coding/\n"
+            "export ANTHROPIC_API_KEY=test-kimi-key\n"
+        ),
+    )
+    _write_executable(
+        home / "bin" / "claude",
+        'for arg in "$@"; do\n'
+        '  if [ "$arg" = "-p" ] || [ "$arg" = "--print" ]; then\n'
+        '    printf "claude ok\\n"\n'
+        "    exit 0\n"
+        "  fi\n"
+        "done\n"
+        'printf "Claude Code 0.0.0\\n"\n',
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "verify-local-kimi-claude-live.sh"
+
+    completed = _run_script(
+        script_path,
+        repo_root=repo_root,
+        home=home,
+        ANTHROPIC_API_KEY="ambient-kimi-key",
+        ANTHROPIC_BASE_URL="https://open.bigmodel.cn/api/anthropic",
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "claude live probe: ok - claude ok"
+    assert completed.stderr == ""
+
+
+def test_verify_local_kimi_claude_live_script_requires_kimi_to_export_anthropic_env(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    _write_fake_shell_home(home, kimi_body=":")
+    _write_executable(
+        home / "bin" / "claude",
+        'for arg in "$@"; do\n'
+        '  if [ "$arg" = "-p" ] || [ "$arg" = "--print" ]; then\n'
+        '    printf "claude ok\\n"\n'
+        "    exit 0\n"
+        "  fi\n"
+        "done\n"
+        'printf "Claude Code 0.0.0\\n"\n',
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "verify-local-kimi-claude-live.sh"
+
+    completed = _run_script(
+        script_path,
+        repo_root=repo_root,
+        home=home,
+        ANTHROPIC_API_KEY="ambient-kimi-key",
+        ANTHROPIC_BASE_URL="https://api.kimi.com/coding/",
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert "claude live probe failed in the Kimi-backed bash login shell." in completed.stderr
+    assert "claude live probe stderr:" in completed.stderr
+    assert "kimi did not export ANTHROPIC_API_KEY" in completed.stderr
+    assert "kept tempdir for debugging:" in completed.stderr
+
+
 def test_verify_local_kimi_claude_live_script_reports_provider_error_details(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -813,6 +886,141 @@ def test_verify_bundled_local_kimi_run_script_times_out_when_agentflow_hangs(tmp
     assert elapsed < 3
 
 
+def test_verify_bundled_local_kimi_smoke_script_times_out_when_agentflow_hangs(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    smoke_path = _copy_script(
+        repo_root / "scripts" / "verify-bundled-local-kimi-smoke.sh",
+        scripts_dir / "verify-bundled-local-kimi-smoke.sh",
+    )
+    _copy_script(
+        repo_root / "scripts" / "custom-local-kimi-helpers.sh",
+        scripts_dir / "custom-local-kimi-helpers.sh",
+    )
+    fake_pythonpath = _write_fake_agentflow_module(
+        tmp_path / "fake-pythonpath",
+        """
+        from __future__ import annotations
+
+        import sys
+        import time
+
+        if len(sys.argv) > 1 and sys.argv[1] == "smoke":
+            print("smoke-stdout", flush=True)
+            print("smoke-stderr", file=sys.stderr, flush=True)
+            time.sleep(5)
+        """,
+    )
+
+    started_at = time.monotonic()
+    completed = subprocess.run(
+        ["bash", str(smoke_path)],
+        capture_output=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "AGENTFLOW_PYTHON": sys.executable,
+            "PYTHONPATH": str(fake_pythonpath),
+            "AGENTFLOW_LOCAL_VERIFY_TIMEOUT_SECONDS": "0.2",
+        },
+        text=True,
+        timeout=5,
+    )
+    elapsed = time.monotonic() - started_at
+
+    bundled_smoke_pipeline = tmp_path / "examples" / "local-real-agents-kimi-smoke.yaml"
+
+    assert completed.returncode == 124
+    assert f"bundled smoke pipeline path: {bundled_smoke_pipeline}" in completed.stdout
+    assert "Timed out after 0.2s:" in completed.stderr
+    assert "agentflow smoke stderr:" in completed.stderr
+    assert "smoke-stderr" in completed.stderr
+    assert "agentflow smoke stdout:" in completed.stderr
+    assert "smoke-stdout" in completed.stderr
+    assert elapsed < 3
+
+
+def test_verify_bundled_local_kimi_smoke_script_accepts_shell_wrapper_bundle_overrides(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+
+    smoke_path = _copy_script(
+        repo_root / "scripts" / "verify-bundled-local-kimi-smoke.sh",
+        scripts_dir / "verify-bundled-local-kimi-smoke.sh",
+    )
+    _copy_script(
+        repo_root / "scripts" / "custom-local-kimi-helpers.sh",
+        scripts_dir / "custom-local-kimi-helpers.sh",
+    )
+    fake_pythonpath = _write_fake_agentflow_module(
+        tmp_path / "fake-pythonpath",
+        """
+        from __future__ import annotations
+
+        import json
+        import sys
+
+        if len(sys.argv) > 2 and sys.argv[1] == "smoke":
+            payload = {
+                "status": "completed",
+                "pipeline": {"name": "local-real-agents-kimi-shell-wrapper-smoke"},
+                "nodes": [
+                    {"id": "codex_plan", "status": "completed", "preview": "codex ok"},
+                    {"id": "claude_review", "status": "completed", "preview": "claude ok"},
+                ],
+            }
+            print(json.dumps(payload), flush=True)
+            print("Doctor: ok", file=sys.stderr, flush=True)
+            print(
+                "- bootstrap_env_override: ok - Node `claude_review`: Local shell bootstrap overrides "
+                "current `ANTHROPIC_API_KEY` for this node via `target.shell` (`kimi` helper).",
+                file=sys.stderr,
+                flush=True,
+            )
+            print(
+                "Pipeline auto preflight: enabled - local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.",
+                file=sys.stderr,
+                flush=True,
+            )
+            print(
+                "Pipeline auto preflight matches: codex_plan (codex) via `target.shell`, "
+                "claude_review (claude) via `target.shell`",
+                file=sys.stderr,
+                flush=True,
+            )
+        """,
+    )
+
+    bundled_wrapper_pipeline = tmp_path / "examples" / "local-real-agents-kimi-shell-wrapper-smoke.yaml"
+
+    completed = subprocess.run(
+        ["bash", str(smoke_path)],
+        capture_output=True,
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "AGENTFLOW_PYTHON": sys.executable,
+            "PYTHONPATH": str(fake_pythonpath),
+            "AGENTFLOW_BUNDLED_PIPELINE_PATH": str(bundled_wrapper_pipeline),
+            "AGENTFLOW_BUNDLED_PIPELINE_NAME": "local-real-agents-kimi-shell-wrapper-smoke",
+            "AGENTFLOW_BUNDLED_EXPECTED_TRIGGER": "target.shell",
+            "AGENTFLOW_BUNDLED_EXPECTED_AUTO_PREFLIGHT_REASON": (
+                "local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap."
+            ),
+        },
+        text=True,
+        timeout=5,
+    )
+
+    assert completed.returncode == 0
+    assert f"bundled smoke pipeline path: {bundled_wrapper_pipeline}" in completed.stdout
+    assert "validated bundled agentflow smoke json-summary stdout and preflight stderr" in completed.stdout
+    assert completed.stderr == ""
+
+
 def test_verify_bundled_local_kimi_run_script_accepts_shell_wrapper_bundle_overrides(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     scripts_dir = tmp_path / "scripts"
@@ -1117,6 +1325,7 @@ def test_verify_local_kimi_stack_script_runs_steps_in_expected_order(tmp_path: P
     for script_name in (
         "verify-local-kimi-shell.sh",
         "verify-local-kimi-claude-live.sh",
+        "verify-bundled-local-kimi-smoke.sh",
         "verify-bundled-local-kimi-run.sh",
         "verify-custom-local-kimi-doctor.sh",
         "verify-custom-local-kimi-inspect.sh",
@@ -1154,17 +1363,17 @@ def test_verify_local_kimi_stack_script_runs_steps_in_expected_order(tmp_path: P
         "verify-local-kimi-claude-live.sh mode=",
         f"agentflow:inspect {bundled_smoke_pipeline} --output summary",
         f"agentflow:doctor {bundled_smoke_pipeline} --output summary",
-        f"agentflow:smoke {bundled_smoke_pipeline} --output summary",
+        "verify-bundled-local-kimi-smoke.sh mode=",
         "verify-bundled-local-kimi-run.sh mode=",
         f"agentflow:check-local {bundled_smoke_pipeline} --output summary",
         f"agentflow:inspect {tmp_path / 'examples' / 'local-real-agents-kimi-shell-init-smoke.yaml'} --output summary",
         f"agentflow:doctor {tmp_path / 'examples' / 'local-real-agents-kimi-shell-init-smoke.yaml'} --output summary",
-        f"agentflow:smoke {tmp_path / 'examples' / 'local-real-agents-kimi-shell-init-smoke.yaml'} --output summary",
+        "verify-bundled-local-kimi-smoke.sh mode=",
         "verify-bundled-local-kimi-run.sh mode=",
         f"agentflow:check-local {tmp_path / 'examples' / 'local-real-agents-kimi-shell-init-smoke.yaml'} --output summary",
         f"agentflow:inspect {tmp_path / 'examples' / 'local-real-agents-kimi-shell-wrapper-smoke.yaml'} --output summary",
         f"agentflow:doctor {tmp_path / 'examples' / 'local-real-agents-kimi-shell-wrapper-smoke.yaml'} --output summary",
-        f"agentflow:smoke {tmp_path / 'examples' / 'local-real-agents-kimi-shell-wrapper-smoke.yaml'} --output summary",
+        "verify-bundled-local-kimi-smoke.sh mode=",
         "verify-bundled-local-kimi-run.sh mode=",
         f"agentflow:check-local {tmp_path / 'examples' / 'local-real-agents-kimi-shell-wrapper-smoke.yaml'} --output summary",
         "verify-custom-local-kimi-doctor.sh mode=",

@@ -32,12 +32,31 @@ run_bundled_run_step() {
     bash "$script_dir/verify-bundled-local-kimi-run.sh"
 }
 
+run_bundled_smoke_step() {
+  local label_suffix="$1"
+  local pipeline_path="$2"
+  local pipeline_name="$3"
+  local expected_trigger="$4"
+  local expected_auto_preflight_reason="$5"
+
+  run_step "Bundled smoke-local${label_suffix}" env \
+    AGENTFLOW_BUNDLED_PIPELINE_PATH="$pipeline_path" \
+    AGENTFLOW_BUNDLED_PIPELINE_NAME="$pipeline_name" \
+    AGENTFLOW_BUNDLED_EXPECTED_TRIGGER="$expected_trigger" \
+    AGENTFLOW_BUNDLED_EXPECTED_AUTO_PREFLIGHT_REASON="$expected_auto_preflight_reason" \
+    bash "$script_dir/verify-bundled-local-kimi-smoke.sh"
+}
+
 run_step "Shell toolchain" bash "$script_dir/verify-local-kimi-shell.sh"
 run_step "Bundled toolchain-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow toolchain-local --output summary
 run_step "Claude-on-Kimi live probe" bash "$script_dir/verify-local-kimi-claude-live.sh"
 run_step "Bundled inspect-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow inspect "$bundled_smoke_pipeline" --output summary
 run_step "Bundled doctor-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow doctor "$bundled_smoke_pipeline" --output summary
-run_step "Bundled smoke-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow smoke "$bundled_smoke_pipeline" --output summary
+run_bundled_smoke_step "" \
+  "$bundled_smoke_pipeline" \
+  "local-real-agents-kimi-smoke" \
+  "target.bootstrap" \
+  "path matches the bundled real-agent smoke pipeline."
 run_bundled_run_step "" \
   "$bundled_smoke_pipeline" \
   "local-real-agents-kimi-smoke" \
@@ -46,7 +65,11 @@ run_bundled_run_step "" \
 run_step "Bundled check-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow check-local "$bundled_smoke_pipeline" --output summary
 run_step "Bundled inspect-local (shell_init)" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow inspect "$bundled_shell_init_pipeline" --output summary
 run_step "Bundled doctor-local (shell_init)" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow doctor "$bundled_shell_init_pipeline" --output summary
-run_step "Bundled smoke-local (shell_init)" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow smoke "$bundled_shell_init_pipeline" --output summary
+run_bundled_smoke_step " (shell_init)" \
+  "$bundled_shell_init_pipeline" \
+  "local-real-agents-kimi-shell-init-smoke" \
+  "target.shell_init" \
+  'local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.'
 run_bundled_run_step " (shell_init)" \
   "$bundled_shell_init_pipeline" \
   "local-real-agents-kimi-shell-init-smoke" \
@@ -55,7 +78,11 @@ run_bundled_run_step " (shell_init)" \
 run_step "Bundled check-local (shell_init)" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow check-local "$bundled_shell_init_pipeline" --output summary
 run_step "Bundled inspect-local (target.shell)" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow inspect "$bundled_shell_wrapper_pipeline" --output summary
 run_step "Bundled doctor-local (target.shell)" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow doctor "$bundled_shell_wrapper_pipeline" --output summary
-run_step "Bundled smoke-local (target.shell)" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow smoke "$bundled_shell_wrapper_pipeline" --output summary
+run_bundled_smoke_step " (target.shell)" \
+  "$bundled_shell_wrapper_pipeline" \
+  "local-real-agents-kimi-shell-wrapper-smoke" \
+  "target.shell" \
+  'local Codex/Claude/Kimi nodes use a `kimi` shell bootstrap.'
 run_bundled_run_step " (target.shell)" \
   "$bundled_shell_wrapper_pipeline" \
   "local-real-agents-kimi-shell-wrapper-smoke" \
