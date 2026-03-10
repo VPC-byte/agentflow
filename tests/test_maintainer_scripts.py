@@ -435,7 +435,7 @@ def test_make_help_verify_local_mentions_bundled_run_local() -> None:
     assert (
         "verify-local  Run the full local Codex + Claude-on-Kimi verification stack across bundled "
         "bootstrap/shell_init/target.shell inspect/doctor/smoke/run/check-local coverage, bundled "
-        "toolchain-local, the live Claude-on-Kimi probe"
+        "toolchain-local, the live Codex and Claude probes"
     ) in completed.stdout
     assert (
         "run-local     Run the bundled local Codex + Claude-on-Kimi pipeline through `agentflow run`"
@@ -484,6 +484,10 @@ def test_make_help_mentions_probe_claude_local_target() -> None:
     )
 
     assert completed.returncode == 0
+    assert (
+        "probe-codex-local Run a minimal live Codex request through the local bash + kimi bootstrap "
+        "and preserve CLI/provider-side errors"
+    ) in completed.stdout
     assert (
         "probe-claude-local Run a minimal live Claude-on-Kimi request through the local bash + kimi "
         "bootstrap and preserve provider-side errors"

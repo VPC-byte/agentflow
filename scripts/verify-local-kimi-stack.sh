@@ -49,6 +49,7 @@ run_bundled_smoke_step() {
 
 run_step "Shell toolchain" bash "$script_dir/verify-local-kimi-shell.sh"
 run_step "Bundled toolchain-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow toolchain-local --output summary
+run_step "Codex live probe" bash "$script_dir/verify-local-kimi-codex-live.sh"
 run_step "Claude-on-Kimi live probe" bash "$script_dir/verify-local-kimi-claude-live.sh"
 run_step "Bundled inspect-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow inspect "$bundled_smoke_pipeline" --output summary
 run_step "Bundled doctor-local" agentflow_run_with_timeout "$python_bin" "$python_bin" -m agentflow doctor "$bundled_smoke_pipeline" --output summary
