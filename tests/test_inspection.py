@@ -178,3 +178,51 @@ nodes:
     assert summary["nodes"][0]["bootstrap_home"] == str(custom_home.resolve())
     assert summary["nodes"][0]["auth"] == "`ANTHROPIC_API_KEY` via `target.shell`"
     assert f"Bootstrap home: {custom_home.resolve()}" in render_launch_inspection_summary(report)
+
+
+def test_build_launch_inspection_summary_warns_when_active_login_startup_does_not_reach_bashrc(
+    tmp_path,
+    monkeypatch,
+):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".bash_profile").write_text('export PATH="$HOME/bin:$PATH"\n', encoding="utf-8")
+    (home / ".bashrc").write_text("export PATH=\"$HOME/.local/bin:$PATH\"\n", encoding="utf-8")
+
+    pipeline_path = tmp_path / "pipeline.yaml"
+    pipeline_path.write_text(
+        """name: inspect-startup-warning
+working_dir: .
+nodes:
+  - id: plan
+    agent: codex
+    prompt: hi
+    target:
+      kind: local
+      shell: bash
+      shell_login: true
+      shell_interactive: true
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    pipeline = load_pipeline_from_path(pipeline_path)
+    report = build_launch_inspection(pipeline, runs_dir=str(tmp_path / ".agentflow"))
+    summary = build_launch_inspection_summary(report)
+    rendered = render_launch_inspection_summary(report)
+
+    assert summary["nodes"][0]["warnings"] == [
+        "Bash login startup uses `~/.bash_profile`, but it does not reach `~/.bashrc`."
+    ]
+    assert summary["nodes"][0]["shell_bridge"] == {
+        "target": "~/.bash_profile",
+        "source": "~/.bashrc",
+        "reason": "Bash login shells use `~/.bash_profile`, but it does not reference `~/.bashrc`.",
+        "snippet": 'if [ -f "$HOME/.bashrc" ]; then\n  . "$HOME/.bashrc"\nfi\n',
+    }
+    assert "Warning: Bash login startup uses `~/.bash_profile`, but it does not reach `~/.bashrc`." in rendered
+    assert "Shell bridge suggestion for `~/.bash_profile` from `~/.bashrc`:" in rendered

@@ -22,7 +22,6 @@ from agentflow.local_shell import (
     shell_template_exported_env_var_value_before_command,
     shell_template_exports_env_var_before_command,
     target_bash_home,
-    target_bash_login_startup_file,
     target_bash_login_startup_warning,
     target_disables_bash_login_startup,
     target_bash_startup_exports_env_var,
@@ -534,7 +533,6 @@ def _target_shell_bridge(
     launch_env: dict[str, str] | None = None,
     *,
     cwd: str | None = None,
-    auth_summary: str | None = None,
 ) -> dict[str, str] | None:
     if target.get("kind") != "local" or not target_uses_login_bash(target):
         return None
@@ -543,14 +541,6 @@ def _target_shell_bridge(
 
     login_startup_warning = target_bash_login_startup_warning(target, env=launch_env, cwd=cwd)
     if login_startup_warning is None:
-        return None
-
-    login_startup_file = target_bash_login_startup_file(target, env=launch_env, cwd=cwd)
-    if (
-        login_startup_file is not None
-        and _kimi_helper_bootstrap_source(target) is None
-        and not auth_summary_depends_on_local_shell_bootstrap(auth_summary)
-    ):
         return None
 
     effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
@@ -565,19 +555,13 @@ def _target_warnings(
     launch_env: dict[str, str] | None = None,
     *,
     cwd: str | None = None,
-    auth_summary: str | None = None,
 ) -> list[str]:
     warnings: list[str] = []
 
     effective_home = target_bash_home(target, env=launch_env, cwd=cwd)
 
     login_startup_warning = target_bash_login_startup_warning(target, env=launch_env, cwd=cwd)
-    login_startup_file = target_bash_login_startup_file(target, env=launch_env, cwd=cwd)
-    if login_startup_warning is not None and (
-        login_startup_file is None
-        or _kimi_helper_bootstrap_source(target) is not None
-        or auth_summary_depends_on_local_shell_bootstrap(auth_summary)
-    ):
+    if login_startup_warning is not None:
         warnings.append(login_startup_warning)
 
     kimi_bash_warning = kimi_shell_init_requires_bash_warning(target)
@@ -1072,7 +1056,6 @@ def build_launch_inspection(
             node_plan["target"],
             prepared.env,
             cwd=prepared.cwd,
-            auth_summary=auth_summary,
         )
         if shell_bridge:
             node_plan["shell_bridge"] = shell_bridge
@@ -1100,7 +1083,6 @@ def build_launch_inspection(
                 node_plan["target"],
                 prepared.env,
                 cwd=prepared.cwd,
-                auth_summary=auth_summary,
             )
             + _launch_env_override_warnings(node, resolved_provider, prepared.env)
             + _launch_env_inheritance_warnings(node, resolved_provider, prepared.env, cwd=prepared.cwd)
