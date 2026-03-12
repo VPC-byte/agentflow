@@ -40,7 +40,7 @@ nodes:
       For each agent directory agents/agent_{1..5}:
         - If a file chromium_agent_assets/utils.py exists, copy it to agents/agent_N/utils.py
         - If a file chromium_agent_assets/playwright_template.py exists, copy it to agents/agent_N/playwright_template.py
-        - If agents/agent_N/input_N.py does not exist, copy playwright_template.py to agents/agent_N/input_N.py
+        - If agents/agent_N/input_N.py does not exist, copy agents/agent_N/playwright_template.py to agents/agent_N/input_N.py
 
       Then respond with exactly: INIT_OK
 
