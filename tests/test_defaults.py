@@ -5,6 +5,7 @@ from agentflow.defaults import (
     bundled_templates,
     default_smoke_pipeline_path,
     load_bundled_template_yaml,
+    render_bundled_template,
 )
 from agentflow.loader import load_pipeline_from_path
 
@@ -27,6 +28,15 @@ def test_bundled_templates_expose_descriptions_and_example_files():
     assert "fanout.matrix_path" in by_name["codex-fuzz-matrix-manifest-128"].description
     assert by_name["codex-fuzz-matrix-manifest-128"].support_files == (
         "manifests/codex-fuzz-matrix-manifest-128.axes.yaml",
+    )
+    assert by_name["codex-fuzz-catalog"].example_name == "fuzz/codex-fuzz-catalog.yaml"
+    assert "CSV shard catalog" in by_name["codex-fuzz-catalog"].description
+    assert by_name["codex-fuzz-catalog"].support_files == ("manifests/codex-fuzz-catalog.csv",)
+    assert tuple(parameter.name for parameter in by_name["codex-fuzz-catalog"].parameters) == (
+        "shards",
+        "concurrency",
+        "name",
+        "working_dir",
     )
     assert by_name["codex-fuzz-swarm"].example_name == "fuzz/fuzz_codex_32.yaml"
     assert "defaults to 32 shards" in by_name["codex-fuzz-swarm"].description
@@ -119,6 +129,68 @@ def test_bundled_codex_fuzz_matrix_manifest_128_template_is_available():
     assert bundled_template_support_files("codex-fuzz-matrix-manifest-128") == (
         "manifests/codex-fuzz-matrix-manifest-128.axes.yaml",
     )
+
+
+def test_bundled_codex_fuzz_catalog_template_is_available():
+    assert "codex-fuzz-catalog" in bundled_template_names()
+    assert "\nname: codex-fuzz-catalog-128\n" in f"\n{load_bundled_template_yaml('codex-fuzz-catalog')}"
+    assert bundled_template_support_files("codex-fuzz-catalog") == ("manifests/codex-fuzz-catalog.csv",)
+
+
+def test_bundled_codex_fuzz_catalog_template_matches_default_example_files():
+    expected_yaml = bundled_template_path("codex-fuzz-catalog").read_text(encoding="utf-8")
+    expected_catalog = (
+        bundled_template_path("codex-fuzz-catalog").parent / "manifests" / "codex-fuzz-catalog.csv"
+    ).read_text(encoding="utf-8")
+    rendered = render_bundled_template("codex-fuzz-catalog")
+
+    assert rendered.yaml == expected_yaml
+    assert len(rendered.support_files) == 1
+    assert rendered.support_files[0].relative_path == "manifests/codex-fuzz-catalog.csv"
+    assert rendered.support_files[0].content == expected_catalog
+
+
+def test_bundled_codex_fuzz_catalog_template_accepts_overrides_and_renders_support_file(tmp_path):
+    rendered = render_bundled_template(
+        "codex-fuzz-catalog",
+        values={
+            "shards": "48",
+            "concurrency": "12",
+            "name": "custom-catalog-48",
+            "working_dir": "./custom_catalog",
+        },
+    )
+
+    assert "name: custom-catalog-48\n" in rendered.yaml
+    assert "working_dir: ./custom_catalog\n" in rendered.yaml
+    assert "concurrency: 12\n" in rendered.yaml
+    assert "values_path: manifests/codex-fuzz-catalog.csv" in rendered.yaml
+    assert rendered.support_files[0].relative_path == "manifests/codex-fuzz-catalog.csv"
+    rendered_rows = rendered.support_files[0].content.strip().splitlines()
+    assert len(rendered_rows) == 49
+    assert rendered_rows[0] == "label,target,corpus,sanitizer,focus,bucket,seed,workspace"
+    assert rendered_rows[1].startswith("libpng/asan/parser/seed_001,libpng,png,asan,parser,seed_001,4101,agents/")
+    assert rendered_rows[-1].startswith(
+        "sqlite/ubsan/stateful/seed_003,sqlite,sql,ubsan,stateful,seed_003,4103,agents/"
+    )
+
+    pipeline_path = tmp_path / "custom-catalog.yaml"
+    pipeline_path.write_text(rendered.yaml, encoding="utf-8")
+    support_path = tmp_path / rendered.support_files[0].relative_path
+    support_path.parent.mkdir(parents=True, exist_ok=True)
+    support_path.write_text(rendered.support_files[0].content, encoding="utf-8")
+    pipeline = load_pipeline_from_path(str(pipeline_path))
+
+    assert pipeline.concurrency == 12
+    assert len(pipeline.fanouts["fuzzer"]) == 48
+    assert pipeline.fanouts["fuzzer"][:3] == ["fuzzer_00", "fuzzer_01", "fuzzer_02"]
+    assert pipeline.fanouts["fuzzer"][-1] == "fuzzer_47"
+    assert pipeline.node_map["fuzzer_00"].fanout_member["label"] == "libpng/asan/parser/seed_001"
+    assert pipeline.node_map["fuzzer_16"].fanout_member["bucket"] == "seed_002"
+    assert pipeline.node_map["fuzzer_47"].fanout_member["workspace"] == "agents/sqlite_ubsan_seed_003_47"
+    assert pipeline.node_map["fuzzer_00"].target.cwd.endswith("custom_catalog/agents/libpng_asan_seed_001_00")
+    assert pipeline.node_map["merge"].depends_on[0] == "fuzzer_00"
+    assert pipeline.node_map["merge"].depends_on[-1] == "fuzzer_47"
 
 
 def test_bundled_codex_fuzz_swarm_template_is_available():
@@ -220,6 +292,22 @@ def test_bundled_codex_fuzz_matrix_manifest_128_pipeline_expands_into_128_concre
     assert pipeline.node_map["fuzzer_000"].target.cwd.endswith(
         "codex_fuzz_matrix_manifest_128/agents/libpng_asan_seed_a_000"
     )
+    assert pipeline.node_map["merge"].depends_on[0] == "fuzzer_000"
+    assert pipeline.node_map["merge"].depends_on[-1] == "fuzzer_127"
+
+
+def test_bundled_codex_fuzz_catalog_pipeline_expands_into_128_concrete_nodes():
+    pipeline = load_pipeline_from_path(str(bundled_template_path("codex-fuzz-catalog")))
+
+    assert pipeline.concurrency == 32
+    assert len(pipeline.fanouts["fuzzer"]) == 128
+    assert pipeline.fanouts["fuzzer"][:3] == ["fuzzer_000", "fuzzer_001", "fuzzer_002"]
+    assert pipeline.fanouts["fuzzer"][-1] == "fuzzer_127"
+    assert pipeline.node_map["fuzzer_000"].fanout_member is not None
+    assert pipeline.node_map["fuzzer_000"].fanout_member["label"] == "libpng/asan/parser/seed_001"
+    assert pipeline.node_map["fuzzer_000"].fanout_member["workspace"] == "agents/libpng_asan_seed_001_000"
+    assert pipeline.node_map["fuzzer_127"].fanout_member["bucket"] == "seed_008"
+    assert pipeline.node_map["fuzzer_000"].target.cwd.endswith("codex_fuzz_catalog_128/agents/libpng_asan_seed_001_000")
     assert pipeline.node_map["merge"].depends_on[0] == "fuzzer_000"
     assert pipeline.node_map["merge"].depends_on[-1] == "fuzzer_127"
 

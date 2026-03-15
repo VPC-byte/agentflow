@@ -335,6 +335,13 @@ def test_init_command_requires_destination_for_template_with_support_files():
     )
 
 
+def test_init_command_requires_destination_for_rendered_template_with_support_files():
+    result = runner.invoke(app, ["init", "--template", "codex-fuzz-catalog"])
+
+    assert result.exit_code == 1
+    assert result.stderr == "Template `codex-fuzz-catalog` includes support files and requires a destination path.\n"
+
+
 def test_init_command_prints_codex_fuzz_swarm_template():
     result = runner.invoke(app, ["init", "--template", "codex-fuzz-swarm"])
 
@@ -404,6 +411,8 @@ def test_templates_command_lists_bundled_templates():
         "(source: `examples/fuzz/codex-fuzz-matrix-128.yaml`; use: `agentflow init --template codex-fuzz-matrix-128`)\n"
         "- codex-fuzz-matrix-manifest-128: 128-shard Codex fuzz matrix that loads its axes from `fanout.matrix_path` for easier maintainer edits. "
         "(assets: `manifests/codex-fuzz-matrix-manifest-128.axes.yaml`; source: `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml`; use: `agentflow init --template codex-fuzz-matrix-manifest-128`)\n"
+        "- codex-fuzz-catalog: Configurable Codex fuzz campaign backed by a CSV shard catalog; defaults to 128 shards and keeps per-shard labels and workdirs in the manifest. "
+        "(params: `shards=128`, `concurrency=32`, `name=codex-fuzz-catalog-<shards>`, `working_dir=./codex_fuzz_catalog_<shards>`; assets: `manifests/codex-fuzz-catalog.csv`; source: `examples/fuzz/codex-fuzz-catalog.yaml`; use: `agentflow init --template codex-fuzz-catalog`)\n"
         "- codex-fuzz-swarm: Configurable Codex fuzz swarm scaffold; defaults to 32 shards and scales cleanly to larger campaigns. "
         "(params: `shards=32`, `concurrency=8`, `name=codex-fuzz-swarm-<shards>`, `working_dir=./codex_fuzz_swarm_<shards>`; source: `examples/fuzz/fuzz_codex_32.yaml`; use: `agentflow init --template codex-fuzz-swarm`)\n"
         "- codex-fuzz-swarm-128: 128-shard Codex fuzzing swarm with init, retries, per-shard workdirs, and a merge reducer. "
@@ -438,6 +447,41 @@ def test_init_command_writes_selected_template_and_support_files_to_destination(
     support_file = destination.parent / "manifests" / "codex-fuzz-matrix-manifest-128.axes.yaml"
     assert support_file.exists()
     assert "seed_bucket:" in support_file.read_text(encoding="utf-8")
+
+
+def test_init_command_writes_rendered_template_and_support_files_to_destination(tmp_path):
+    destination = tmp_path / "templates" / "fuzz-catalog.yaml"
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            str(destination),
+            "--template",
+            "codex-fuzz-catalog",
+            "--set",
+            "shards=48",
+            "--set",
+            "concurrency=12",
+            "--set",
+            "name=custom-catalog-48",
+            "--set",
+            "working_dir=./custom_catalog",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout == f"Wrote `codex-fuzz-catalog` template to `{destination}`.\n"
+    rendered_yaml = destination.read_text(encoding="utf-8")
+    assert "\nname: custom-catalog-48\n" in f"\n{rendered_yaml}"
+    assert "concurrency: 12" in rendered_yaml
+    support_file = destination.parent / "manifests" / "codex-fuzz-catalog.csv"
+    assert support_file.exists()
+    support_lines = support_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(support_lines) == 49
+    assert support_lines[0] == "label,target,corpus,sanitizer,focus,bucket,seed,workspace"
+    assert support_lines[1].startswith("libpng/asan/parser/seed_001,libpng,png,asan,parser,seed_001,4101,agents/")
+    assert support_lines[-1].startswith("sqlite/ubsan/stateful/seed_003,sqlite,sql,ubsan,stateful,seed_003,4103,agents/")
 
 
 def test_init_command_refuses_to_overwrite_existing_file_without_force(tmp_path):

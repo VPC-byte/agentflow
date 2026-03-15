@@ -125,6 +125,8 @@ nodes:
       Fuzz {{ shard.target }} with seed {{ shard.seed }}.
 ```
 
+CSV-backed `values_path` catalogs are a good fit when you want each row to carry derived fields such as a per-shard workspace, a reducer label, or another maintainer-owned identifier alongside the target metadata. The bundled [`examples/fuzz/codex-fuzz-catalog.yaml`](/home/shou/agentflow/examples/fuzz/codex-fuzz-catalog.yaml) example and `agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog` scaffold both use that pattern so a large 128-shard campaign can be retargeted by editing [`examples/fuzz/manifests/codex-fuzz-catalog.csv`](/home/shou/agentflow/examples/fuzz/manifests/codex-fuzz-catalog.csv) instead of touching the reducer or launch settings.
+
 ```yaml
 nodes:
   - id: fuzz

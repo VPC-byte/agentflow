@@ -16,10 +16,8 @@ from pydantic import ValidationError
 from agentflow.defaults import (
     bundled_templates,
     bundled_template_names,
-    load_bundled_template_yaml,
     default_smoke_pipeline_path,
-    bundled_template_path,
-    bundled_template_support_files,
+    render_bundled_template,
 )
 from agentflow.doctor import (
     DoctorCheck,
@@ -2016,11 +2014,11 @@ def init(
         raise typer.BadParameter(str(exc), param_hint="--set") from exc
 
     try:
-        template_yaml = load_bundled_template_yaml(template, values=template_settings)
+        rendered_template = render_bundled_template(template, values=template_settings)
     except ValueError as exc:
         param_hint = "--template" if template not in bundled_template_names() else "--set"
         raise typer.BadParameter(str(exc), param_hint=param_hint) from exc
-    support_files = bundled_template_support_files(template)
+    support_files = rendered_template.support_files
 
     if path is None or path == "-":
         if support_files:
@@ -2029,7 +2027,7 @@ def init(
                 err=True,
             )
             raise typer.Exit(code=1)
-        typer.echo(template_yaml, nl=False)
+        typer.echo(rendered_template.yaml, nl=False)
         return
 
     destination = Path(path).expanduser()
@@ -2040,21 +2038,19 @@ def init(
         typer.echo(f"Destination `{destination}` already exists. Use `--force` to overwrite it.", err=True)
         raise typer.Exit(code=1)
 
-    template_path = bundled_template_path(template)
-    support_copies: list[tuple[Path, Path]] = []
-    for relative_path in support_files:
-        source = (template_path.parent / relative_path).resolve()
-        target = destination.parent / relative_path
-        support_copies.append((source, target))
+    support_copies: list[tuple[str, str, Path]] = []
+    for support_file in support_files:
+        target = destination.parent / support_file.relative_path
+        support_copies.append((support_file.relative_path, support_file.content, target))
         if target.exists() and not force:
             typer.echo(f"Destination `{target}` already exists. Use `--force` to overwrite it.", err=True)
             raise typer.Exit(code=1)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(template_yaml, encoding="utf-8")
-    for source, target in support_copies:
+    destination.write_text(rendered_template.yaml, encoding="utf-8")
+    for _relative_path, content, target in support_copies:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(source.read_bytes())
+        target.write_text(content, encoding="utf-8")
     typer.echo(f"Wrote `{template}` template to `{destination}`.")
 
 

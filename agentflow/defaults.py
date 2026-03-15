@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from string import Template
 from typing import Mapping
@@ -22,8 +24,35 @@ class BundledTemplate:
     support_files: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class RenderedBundledTemplateFile:
+    relative_path: str
+    content: str
+
+
+@dataclass(frozen=True)
+class RenderedBundledTemplate:
+    yaml: str
+    support_files: tuple[RenderedBundledTemplateFile, ...] = ()
+
+
 _DEFAULT_FUZZ_SWARM_SHARDS = 32
 _DEFAULT_FUZZ_SWARM_CONCURRENCY = 8
+_DEFAULT_FUZZ_CATALOG_SHARDS = 128
+_DEFAULT_FUZZ_CATALOG_CONCURRENCY = 32
+_FUZZ_CATALOG_SUPPORT_FILE = "manifests/codex-fuzz-catalog.csv"
+_FUZZ_CATALOG_FAMILIES = (
+    {"target": "libpng", "corpus": "png"},
+    {"target": "libjpeg", "corpus": "jpeg"},
+    {"target": "freetype", "corpus": "fonts"},
+    {"target": "sqlite", "corpus": "sql"},
+)
+_FUZZ_CATALOG_STRATEGIES = (
+    {"sanitizer": "asan", "focus": "parser"},
+    {"sanitizer": "asan", "focus": "structure-aware"},
+    {"sanitizer": "ubsan", "focus": "differential"},
+    {"sanitizer": "ubsan", "focus": "stateful"},
+)
 
 
 def _parse_positive_template_int(template_name: str, field_name: str, raw_value: str) -> int:
@@ -36,10 +65,14 @@ def _parse_positive_template_int(template_name: str, field_name: str, raw_value:
     return value
 
 
-def _render_codex_fuzz_swarm_template(values: Mapping[str, str] | None = None) -> str:
-    template_name = "codex-fuzz-swarm"
-    raw_values = dict(values or {})
-    allowed = {"shards", "concurrency", "name", "working_dir"}
+def _template_string_value(template_name: str, field_name: str, raw_value: str | None, *, default: str) -> str:
+    value = (raw_value if raw_value is not None else default).strip()
+    if not value:
+        raise ValueError(f"template `{template_name}` expects `{field_name}` to be a non-empty string")
+    return value
+
+
+def _validate_template_settings(template_name: str, raw_values: Mapping[str, str], *, allowed: set[str]) -> None:
     unknown = sorted(set(raw_values) - allowed)
     if unknown:
         supported = ", ".join(f"`{name}`" for name in sorted(allowed))
@@ -47,6 +80,18 @@ def _render_codex_fuzz_swarm_template(values: Mapping[str, str] | None = None) -
         raise ValueError(
             f"template `{template_name}` does not recognize {unknown_display}; supported settings: {supported}"
         )
+
+
+def _fanout_suffix(index: int, count: int) -> str:
+    width = max(1, len(str(count - 1)))
+    return f"{index:0{width}d}"
+
+
+def _render_codex_fuzz_swarm_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
+    template_name = "codex-fuzz-swarm"
+    raw_values = dict(values or {})
+    allowed = {"shards", "concurrency", "name", "working_dir"}
+    _validate_template_settings(template_name, raw_values, allowed=allowed)
 
     shards = _parse_positive_template_int(
         template_name,
@@ -58,18 +103,15 @@ def _render_codex_fuzz_swarm_template(values: Mapping[str, str] | None = None) -
         "concurrency",
         raw_values.get("concurrency", str(_DEFAULT_FUZZ_SWARM_CONCURRENCY)),
     )
-    name = raw_values.get("name", f"codex-fuzz-swarm-{shards}").strip()
-    if not name:
-        raise ValueError(f"template `{template_name}` expects `name` to be a non-empty string")
-    working_dir = raw_values.get("working_dir", f"./codex_fuzz_swarm_{shards}").strip()
-    if not working_dir:
-        raise ValueError(f"template `{template_name}` expects `working_dir` to be a non-empty string")
+    name = _template_string_value(template_name, "name", raw_values.get("name"), default=f"codex-fuzz-swarm-{shards}")
+    working_dir = _template_string_value(
+        template_name,
+        "working_dir",
+        raw_values.get("working_dir"),
+        default=f"./codex_fuzz_swarm_{shards}",
+    )
 
-    suffix_width = max(1, len(str(shards - 1)))
-    suffix_start = f"{0:0{suffix_width}d}"
-    suffix_end = f"{shards - 1:0{suffix_width}d}"
-
-    return Template(
+    rendered_yaml = Template(
         """# Configurable Codex fuzzing swarm
 #
 # This scaffold is the easiest way to right-size a Codex fuzz campaign for the
@@ -166,8 +208,184 @@ nodes:
         shards=shards,
         working_dir=working_dir,
         concurrency=concurrency,
-        suffix_start=suffix_start,
-        suffix_end=suffix_end,
+        suffix_start=_fanout_suffix(0, shards),
+        suffix_end=_fanout_suffix(shards - 1, shards),
+    )
+    return RenderedBundledTemplate(yaml=rendered_yaml)
+
+
+def _render_codex_fuzz_catalog_rows(shards: int) -> list[dict[str, str]]:
+    combinations = [(family, strategy) for family in _FUZZ_CATALOG_FAMILIES for strategy in _FUZZ_CATALOG_STRATEGIES]
+    rendered_rows: list[dict[str, str]] = []
+    for index in range(shards):
+        family, strategy = combinations[index % len(combinations)]
+        bucket_index = index // len(combinations)
+        bucket = f"seed_{bucket_index + 1:03d}"
+        suffix = _fanout_suffix(index, shards)
+        rendered_rows.append(
+            {
+                "label": f"{family['target']}/{strategy['sanitizer']}/{strategy['focus']}/{bucket}",
+                "target": family["target"],
+                "corpus": family["corpus"],
+                "sanitizer": strategy["sanitizer"],
+                "focus": strategy["focus"],
+                "bucket": bucket,
+                "seed": str(4101 + bucket_index),
+                "workspace": f"agents/{family['target']}_{strategy['sanitizer']}_{bucket}_{suffix}",
+            }
+        )
+    return rendered_rows
+
+
+def _render_codex_fuzz_catalog_csv(shards: int) -> str:
+    rows = _render_codex_fuzz_catalog_rows(shards)
+    buffer = StringIO()
+    fieldnames = ("label", "target", "corpus", "sanitizer", "focus", "bucket", "seed", "workspace")
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
+def _render_codex_fuzz_catalog_template(values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
+    template_name = "codex-fuzz-catalog"
+    raw_values = dict(values or {})
+    allowed = {"shards", "concurrency", "name", "working_dir"}
+    _validate_template_settings(template_name, raw_values, allowed=allowed)
+
+    shards = _parse_positive_template_int(
+        template_name,
+        "shards",
+        raw_values.get("shards", str(_DEFAULT_FUZZ_CATALOG_SHARDS)),
+    )
+    concurrency = _parse_positive_template_int(
+        template_name,
+        "concurrency",
+        raw_values.get("concurrency", str(_DEFAULT_FUZZ_CATALOG_CONCURRENCY)),
+    )
+    name = _template_string_value(
+        template_name,
+        "name",
+        raw_values.get("name"),
+        default=f"codex-fuzz-catalog-{shards}",
+    )
+    working_dir = _template_string_value(
+        template_name,
+        "working_dir",
+        raw_values.get("working_dir"),
+        default=f"./codex_fuzz_catalog_{shards}",
+    )
+
+    rendered_yaml = Template(
+        """# Configurable Codex fuzz catalog
+#
+# This scaffold keeps shard metadata in a sidecar CSV so maintainers can retarget
+# large campaigns in a spreadsheet without rewriting the reducer or launch settings.
+#
+# Usage:
+#   agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog
+#   agentflow init fuzz-catalog-48.yaml --template codex-fuzz-catalog --set shards=48 --set concurrency=12
+#   agentflow inspect fuzz-catalog.yaml --output summary
+#   agentflow run fuzz-catalog.yaml --preflight never
+
+name: $name
+description: Configurable $shards-shard Codex fuzz campaign backed by a CSV shard catalog for maintainer-friendly retargeting.
+working_dir: $working_dir
+concurrency: $concurrency
+
+nodes:
+  - id: init
+    agent: codex
+    tools: read_write
+    timeout_seconds: 60
+    prompt: |
+      Create the following directory structure silently if it does not already exist:
+        mkdir -p docs crashes agents
+      Read `$_FUZZ_CATALOG_SUPPORT_FILE` and create every unique workspace listed in the `workspace` column.
+      Do not modify the catalog itself.
+      If crashes/README.md is missing or empty, create it with:
+        # Crash Registry
+        | Timestamp | Label | Target | Evidence | Artifact |
+        |---|---|---|---|---|
+      If docs/campaign_notes.md is missing or empty, create it with:
+        # Campaign Notes
+        Use this file only for cross-shard lessons and retargeting guidance.
+      Then respond with exactly: INIT_OK
+
+    success_criteria:
+      - kind: output_contains
+        value: INIT_OK
+
+  - id: fuzzer
+    fanout:
+      as: shard
+      values_path: $_FUZZ_CATALOG_SUPPORT_FILE
+    agent: codex
+    model: gpt-5-codex
+    tools: read_write
+    depends_on: [init]
+    target:
+      kind: local
+      cwd: "{{ shard.workspace }}"
+    timeout_seconds: 3600
+    retries: 2
+    retry_backoff_seconds: 2
+    extra_args:
+      - "--search"
+      - "-c"
+      - 'model_reasoning_effort="high"'
+    prompt: |
+      You are Codex fuzz shard {{ shard.number }} of {{ shard.count }} in an authorized campaign.
+
+      Campaign inputs:
+      - Catalog label: {{ shard.label }}
+      - Target: {{ shard.target }}
+      - Corpus family: {{ shard.corpus }}
+      - Sanitizer: {{ shard.sanitizer }}
+      - Strategy focus: {{ shard.focus }}
+      - Seed bucket: {{ shard.bucket }}
+      - Seed: {{ shard.seed }}
+      - Workspace: {{ shard.workspace }}
+
+      Shard contract:
+      - Stay within {{ shard.workspace }} unless you are appending to the shared crash registry or notes.
+      - Treat `$_FUZZ_CATALOG_SUPPORT_FILE` as the source of truth for your assignment.
+      - Use the catalog label, target family, sanitizer, focus, and seed bucket to keep the campaign reproducible.
+      - Prefer high-signal crashers, assertion failures, memory safety bugs, or logic corruptions.
+      - Record confirmed findings in `crashes/README.md` and copy minimal repro artifacts into `crashes/`.
+      - Add short cross-shard lessons to `docs/campaign_notes.md` when they help other shards avoid duplicate work.
+
+  - id: merge
+    agent: codex
+    model: gpt-5-codex
+    tools: read_only
+    depends_on: [fuzzer]
+    timeout_seconds: 300
+    prompt: |
+      Consolidate this $shards-shard catalog-backed fuzz campaign into a maintainer handoff.
+      Group the findings by target family first, then by sanitizer/focus, and end with catalog rows that need retargeting.
+
+      {% for shard in fanouts.fuzzer.nodes %}
+      ### {{ shard.label }} :: {{ shard.id }} (status: {{ shard.status }})
+      {{ shard.output or "(no output)" }}
+
+      {% endfor %}
+"""
+    ).substitute(
+        name=name,
+        shards=shards,
+        working_dir=working_dir,
+        concurrency=concurrency,
+        _FUZZ_CATALOG_SUPPORT_FILE=_FUZZ_CATALOG_SUPPORT_FILE,
+    )
+    return RenderedBundledTemplate(
+        yaml=rendered_yaml,
+        support_files=(
+            RenderedBundledTemplateFile(
+                relative_path=_FUZZ_CATALOG_SUPPORT_FILE,
+                content=_render_codex_fuzz_catalog_csv(shards),
+            ),
+        ),
     )
 
 
@@ -197,6 +415,34 @@ _BUNDLED_TEMPLATES = (
         example_name="fuzz/codex-fuzz-matrix-manifest-128.yaml",
         description="128-shard Codex fuzz matrix that loads its axes from `fanout.matrix_path` for easier maintainer edits.",
         support_files=("manifests/codex-fuzz-matrix-manifest-128.axes.yaml",),
+    ),
+    BundledTemplate(
+        name="codex-fuzz-catalog",
+        example_name="fuzz/codex-fuzz-catalog.yaml",
+        description="Configurable Codex fuzz campaign backed by a CSV shard catalog; defaults to 128 shards and keeps per-shard labels and workdirs in the manifest.",
+        parameters=(
+            BundledTemplateParameter(
+                name="shards",
+                description="Number of catalog rows and Codex fuzz workers to render.",
+                default=str(_DEFAULT_FUZZ_CATALOG_SHARDS),
+            ),
+            BundledTemplateParameter(
+                name="concurrency",
+                description="Maximum number of shards to run in parallel.",
+                default=str(_DEFAULT_FUZZ_CATALOG_CONCURRENCY),
+            ),
+            BundledTemplateParameter(
+                name="name",
+                description="Pipeline name override.",
+                default="codex-fuzz-catalog-<shards>",
+            ),
+            BundledTemplateParameter(
+                name="working_dir",
+                description="Pipeline working directory override.",
+                default="./codex_fuzz_catalog_<shards>",
+            ),
+        ),
+        support_files=(_FUZZ_CATALOG_SUPPORT_FILE,),
     ),
     BundledTemplate(
         name="codex-fuzz-swarm",
@@ -250,6 +496,7 @@ _BUNDLED_TEMPLATES = (
 _BUNDLED_TEMPLATE_FILES = {template.name: template.example_name for template in _BUNDLED_TEMPLATES}
 _BUNDLED_TEMPLATE_SUPPORT_FILES = {template.name: template.support_files for template in _BUNDLED_TEMPLATES}
 _BUNDLED_TEMPLATE_RENDERERS = {
+    "codex-fuzz-catalog": _render_codex_fuzz_catalog_template,
     "codex-fuzz-swarm": _render_codex_fuzz_swarm_template,
 }
 
@@ -351,12 +598,12 @@ def bundled_template_support_files(name: str) -> tuple[str, ...]:
         ) from exc
 
 
-def load_bundled_template_yaml(name: str, values: Mapping[str, str] | None = None) -> str:
+def render_bundled_template(name: str, values: Mapping[str, str] | None = None) -> RenderedBundledTemplate:
     template_values = dict(values or {})
     if name == "pipeline":
         if template_values:
             raise ValueError("template `pipeline` does not accept `--set` values")
-        return load_default_pipeline_yaml()
+        return RenderedBundledTemplate(yaml=load_default_pipeline_yaml())
 
     renderer = _BUNDLED_TEMPLATE_RENDERERS.get(name)
     if renderer is not None:
@@ -366,7 +613,21 @@ def load_bundled_template_yaml(name: str, values: Mapping[str, str] | None = Non
     if template_values:
         raise ValueError(f"template `{name}` does not accept `--set` values")
 
-    return template_path.read_text(encoding="utf-8")
+    rendered_support_files = tuple(
+        RenderedBundledTemplateFile(
+            relative_path=relative_path,
+            content=(template_path.parent / relative_path).resolve().read_text(encoding="utf-8"),
+        )
+        for relative_path in bundled_template_support_files(name)
+    )
+    return RenderedBundledTemplate(
+        yaml=template_path.read_text(encoding="utf-8"),
+        support_files=rendered_support_files,
+    )
+
+
+def load_bundled_template_yaml(name: str, values: Mapping[str, str] | None = None) -> str:
+    return render_bundled_template(name, values=values).yaml
 
 
 def default_smoke_pipeline_path() -> str:

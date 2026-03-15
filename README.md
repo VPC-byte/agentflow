@@ -26,6 +26,7 @@ agentflow init repo-sweep.yaml --template codex-fanout-repo-sweep
 agentflow init fuzz-matrix.yaml --template codex-fuzz-matrix
 agentflow init fuzz-matrix-128.yaml --template codex-fuzz-matrix-128
 agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest-128
+agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog
 agentflow init fuzz-swarm.yaml --template codex-fuzz-swarm
 agentflow init fuzz-128.yaml --template codex-fuzz-swarm --set shards=128 --set concurrency=32
 agentflow validate pipeline.yaml
@@ -46,6 +47,7 @@ Choose a starter:
 - `codex-fuzz-matrix` for heterogeneous campaigns built from reusable axes
 - `codex-fuzz-matrix-128` for a full 128-shard matrix reference
 - `codex-fuzz-matrix-manifest-128` for a 128-shard matrix whose axes live in a sidecar manifest
+- `codex-fuzz-catalog` for spreadsheet-friendly shard catalogs with explicit per-row labels and workdirs
 - `codex-fuzz-swarm` for homogeneous shard swarms you resize with `--set shards=...`
 
 ## Example
@@ -183,7 +185,7 @@ nodes:
       {% endfor %}
 ```
 
-When the shard catalog or matrix axes need to live outside the main pipeline file, use `fanout.values_path` or `fanout.matrix_path`. `values_path` accepts JSON/YAML lists and CSV files; `matrix_path` accepts JSON/YAML objects. Relative paths resolve from the pipeline file, which keeps large maintainer-owned catalogs easy to retarget without rewriting the reducer or launch settings.
+When the shard catalog or matrix axes need to live outside the main pipeline file, use `fanout.values_path` or `fanout.matrix_path`. `values_path` accepts JSON/YAML lists and CSV files; `matrix_path` accepts JSON/YAML objects. Relative paths resolve from the pipeline file, which keeps large maintainer-owned catalogs easy to retarget without rewriting the reducer or launch settings. CSV-backed catalogs are especially useful when you want to carry precomputed fields like `workspace` and `label` alongside target metadata so large reducers stay short.
 
 ```yaml
 nodes:
@@ -196,7 +198,7 @@ nodes:
       Fuzz {{ shard.target }} with {{ shard.sanitizer }} using seed {{ shard.seed }}.
 ```
 
-See `examples/codex-fanout-repo-sweep.yaml` for a bundled maintainer-friendly review template, `examples/fuzz/codex-fuzz-matrix.yaml` for an adaptation-friendly `fanout.matrix` fuzz starter, `examples/fuzz/codex-fuzz-matrix-128.yaml` for a 128-shard inline matrix reference, `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml` for the same scale with external axes, `examples/fuzz/fuzz_codex_32.yaml` for the default right-sized Codex fuzz swarm, and `examples/fuzz/fuzz_codex_128.yaml` for the fixed 128-shard homogeneous reference swarm. The fuzz starters are scaffoldable via `agentflow init --template codex-fuzz-matrix`, `agentflow init --template codex-fuzz-matrix-128`, `agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest-128`, `agentflow init --template codex-fuzz-swarm`, and `agentflow init --template codex-fuzz-swarm --set shards=128 --set concurrency=32`.
+See `examples/codex-fanout-repo-sweep.yaml` for a bundled maintainer-friendly review template, `examples/fuzz/codex-fuzz-matrix.yaml` for an adaptation-friendly `fanout.matrix` fuzz starter, `examples/fuzz/codex-fuzz-matrix-128.yaml` for a 128-shard inline matrix reference, `examples/fuzz/codex-fuzz-matrix-manifest-128.yaml` for the same scale with external axes, `examples/fuzz/codex-fuzz-catalog.yaml` for a 128-shard CSV-backed shard catalog, `examples/fuzz/fuzz_codex_32.yaml` for the default right-sized Codex fuzz swarm, and `examples/fuzz/fuzz_codex_128.yaml` for the fixed 128-shard homogeneous reference swarm. The fuzz starters are scaffoldable via `agentflow init --template codex-fuzz-matrix`, `agentflow init --template codex-fuzz-matrix-128`, `agentflow init fuzz-matrix-manifest-128.yaml --template codex-fuzz-matrix-manifest-128`, `agentflow init fuzz-catalog.yaml --template codex-fuzz-catalog`, `agentflow init --template codex-fuzz-swarm`, and `agentflow init --template codex-fuzz-swarm --set shards=128 --set concurrency=32`.
 
 ## Docs
 
