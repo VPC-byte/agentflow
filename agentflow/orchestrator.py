@@ -496,20 +496,15 @@ class Orchestrator:
         )
         paths = self._build_paths(pipeline, run_id, node_id, node.target)
 
-        # Inject scratchboard content into prompt
+        # Inject scratchboard file location into prompt
         scratchboard = self._scratchboards.get(run_id)
         if scratchboard is not None:
             from agentflow.scratchboard import SCRATCHBOARD_FILENAME, SCRATCHBOARD_PROMPT_SUFFIX
-            sb_content = scratchboard.read()
-            # Local nodes get the real file path; remote nodes get the runtime path
             if node.target.kind == "local":
                 sb_path = str(scratchboard.path)
             else:
                 sb_path = f"{paths.target_runtime_dir}/{SCRATCHBOARD_FILENAME}"
-            prompt += SCRATCHBOARD_PROMPT_SUFFIX.format(
-                scratchboard_content=sb_content,
-                scratchboard_path=sb_path,
-            )
+            prompt += SCRATCHBOARD_PROMPT_SUFFIX.format(scratchboard_path=sb_path)
         adapter = self.adapters.get(node.agent)
         runner = self.runners.get(node.target.kind)
         parser = create_trace_parser(node.agent, node.id)

@@ -59,11 +59,8 @@ SCRATCHBOARD_FILENAME = "scratchboard.md"
 SCRATCHBOARD_PROMPT_SUFFIX = """
 
 ---
-SHARED SCRATCHBOARD (read/written by all agents in this pipeline):
-{scratchboard_content}
----
-IMPORTANT: If you discover something critical that other agents should know
-(patterns found, bugs discovered, areas to avoid, key insights, warnings),
-append it concisely to the scratchboard file at: {scratchboard_path}
-Only write things that are NOT already in the scratchboard above.
-"""
+SHARED SCRATCHBOARD: {scratchboard_path}
+Read this file for context and findings from other agents.
+If you discover something critical (patterns, bugs, warnings, insights),
+append it concisely to that file. Only add what is not already there.
+---"""
