@@ -333,6 +333,9 @@ def merge(
     if derive is not None:
         payload["derive"] = deepcopy(derive)
     node.kwargs["fanout"] = payload
+    # Auto-add dependency on source so edges are drawn and scheduling works
+    if source.id not in node.depends_on:
+        node.depends_on.append(source.id)
     return node
 
 
