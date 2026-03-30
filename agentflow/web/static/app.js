@@ -9,6 +9,9 @@ const state = {
   artifactCache: new Map(),
   eventSource: null,
   validationPipeline: null,
+  detailAutoScroll: true,
+  detailScrollNodeId: null,
+  detailEventSignature: null,
 };
 
 async function api(path, options = {}) {
@@ -612,21 +615,601 @@ async function fetchArtifact(nodeId, name) {
   return content;
 }
 
-async function renderDetail() {
+function ensureDetailEnhancements() {
+  if (!document.getElementById("detail-enhancement-styles")) {
+    const style = document.createElement("style");
+    style.id = "detail-enhancement-styles";
+    style.textContent = `
+      .trace-stack {
+        display: grid;
+        gap: 0.85rem;
+      }
+
+      .trace-card {
+        margin: 0;
+        border: 1px solid rgba(48, 54, 61, 0.92);
+        border-left: 4px solid var(--trace-accent, rgba(88, 166, 255, 0.82));
+        border-radius: 14px;
+        background: rgba(13, 17, 23, 0.72);
+        overflow: hidden;
+      }
+
+      .trace-card[open] {
+        background: rgba(17, 22, 29, 0.92);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+      }
+
+      .trace-card.trace-card-error {
+        border-left-color: rgba(248, 81, 73, 0.88);
+      }
+
+      .trace-card > summary {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        list-style: none;
+        cursor: pointer;
+        padding: 0.9rem;
+      }
+
+      .trace-card > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .trace-card-body {
+        padding: 0 0.9rem 0.9rem;
+      }
+
+      .trace-card-header {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        flex-wrap: wrap;
+      }
+
+      .trace-card-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+      }
+
+      .trace-tool-icon {
+        width: 1.85rem;
+        height: 1.85rem;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #f0f6fc;
+        background: var(--trace-accent, rgba(88, 166, 255, 0.82));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+
+      .trace-tool-icon-exec {
+        --trace-accent: rgba(88, 166, 255, 0.82);
+      }
+
+      .trace-tool-icon-read {
+        --trace-accent: rgba(63, 185, 80, 0.82);
+      }
+
+      .trace-tool-icon-write {
+        --trace-accent: rgba(210, 153, 34, 0.86);
+      }
+
+      .trace-tool-icon-error {
+        --trace-accent: rgba(248, 81, 73, 0.88);
+      }
+
+      .trace-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        min-height: 1.5rem;
+        padding: 0.08rem 0.5rem;
+        border: 1px solid rgba(139, 148, 158, 0.32);
+        border-radius: 999px;
+        background: rgba(139, 148, 158, 0.1);
+        color: var(--muted);
+        font-size: 0.71rem;
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+
+      .trace-pill.trace-pill-success {
+        border-color: rgba(63, 185, 80, 0.42);
+        background: rgba(63, 185, 80, 0.12);
+        color: #7ee787;
+      }
+
+      .trace-pill.trace-pill-failure {
+        border-color: rgba(248, 81, 73, 0.42);
+        background: rgba(248, 81, 73, 0.12);
+        color: #ff7b72;
+      }
+
+      .trace-command-block {
+        margin-top: 0.75rem;
+        background: #0b0f14;
+        border-color: rgba(88, 166, 255, 0.24);
+      }
+
+      .trace-json-key {
+        color: #79c0ff;
+      }
+
+      .trace-json-value {
+        color: #a5d6ff;
+      }
+
+      .trace-block {
+        display: grid;
+        gap: 0.45rem;
+      }
+
+      .trace-block + .trace-block {
+        margin-top: 0.75rem;
+      }
+
+      .trace-subsection {
+        margin-top: 0.75rem;
+        border: 1px solid rgba(48, 54, 61, 0.82);
+        border-radius: 12px;
+        background: rgba(8, 11, 17, 0.55);
+      }
+
+      .trace-subsection > summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 0.68rem 0.85rem;
+        color: var(--muted);
+        font-size: 0.76rem;
+      }
+
+      .trace-subsection > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .trace-subsection-body {
+        padding: 0 0.85rem 0.85rem;
+      }
+
+      .trace-empty {
+        padding: 0.9rem;
+        border: 1px dashed rgba(48, 54, 61, 0.85);
+        border-radius: 14px;
+        color: var(--muted);
+        font-size: 0.76rem;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   const detail = document.getElementById("detail");
-  const selected = state.selectedNodeId && state.nodes[state.selectedNodeId];
-  document.getElementById("selected-node").textContent = state.selectedNodeId || "None selected";
-  if (!selected || !state.selectedNodeId) {
+  if (detail && !detail.dataset.scrollTrackingBound) {
+    detail.dataset.scrollTrackingBound = "true";
+    detail.addEventListener("scroll", () => {
+      state.detailAutoScroll = detail.scrollHeight - detail.scrollTop - detail.clientHeight < 32;
+    });
+  }
+}
+
+function formatElapsedSeconds(seconds) {
+  if (!Number.isFinite(seconds)) return null;
+  if (seconds < 1) return `${Math.max(1, Math.round(seconds * 1000))}ms`;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return `${minutes}m ${remainder}s`;
+}
+
+function maybeParseJson(value) {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  if (!["{", "[", "\""].includes(trimmed[0])) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function isStructuredValue(value) {
+  return value !== null && typeof value === "object";
+}
+
+function renderJsonMarkup(value) {
+  const normalized = isStructuredValue(value) ? value : maybeParseJson(value);
+  if (!isStructuredValue(normalized)) return escapeHtml(String(value ?? ""));
+  const json = JSON.stringify(normalized, null, 2);
+  const tokenPattern = /"(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(?=\s*:)|"(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+  let result = "";
+  let lastIndex = 0;
+  for (const match of json.matchAll(tokenPattern)) {
+    result += escapeHtml(json.slice(lastIndex, match.index));
+    const token = match[0];
+    const suffix = json.slice((match.index || 0) + token.length).trimStart().startsWith(":");
+    const className = suffix && token.startsWith("\"") ? "trace-json-key" : "trace-json-value";
+    result += `<span class="${className}">${escapeHtml(token)}</span>`;
+    lastIndex = (match.index || 0) + token.length;
+  }
+  result += escapeHtml(json.slice(lastIndex));
+  return result;
+}
+
+function renderPreBlock(value, className = "") {
+  const normalized = maybeParseJson(value);
+  const classes = ["output-box"];
+  if (className) classes.push(className);
+  const html = isStructuredValue(normalized) ? renderJsonMarkup(normalized) : escapeHtml(String(value ?? ""));
+  return `<pre class="${classes.join(" ")}">${html}</pre>`;
+}
+
+function renderBlock(label, value, options = {}) {
+  if (value === null || value === undefined || value === "") return "";
+  const content = `<div class="trace-subsection-body">${renderPreBlock(value, options.className || "")}</div>`;
+  if (options.collapsed) {
+    return `
+      <details class="trace-subsection"${options.open ? " open" : ""}>
+        <summary>${escapeHtml(label)}</summary>
+        ${content}
+      </details>
+    `;
+  }
+  return `
+    <div class="trace-block">
+      <div class="small">${escapeHtml(label)}</div>
+      ${renderPreBlock(value, options.className || "")}
+    </div>
+  `;
+}
+
+function findNestedEntry(source, predicate, depth = 0) {
+  const normalized = maybeParseJson(source);
+  if (normalized !== source) return findNestedEntry(normalized, predicate, depth + 1);
+  if (source === null || source === undefined || depth > 5) return null;
+  if (Array.isArray(source)) {
+    for (const item of source) {
+      const found = findNestedEntry(item, predicate, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof source !== "object") return null;
+  for (const [key, value] of Object.entries(source)) {
+    if (predicate(key, value)) return { key, value };
+    const found = findNestedEntry(value, predicate, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function extractToolName(trace) {
+  const raw = trace?.raw || {};
+  return raw.name ||
+    raw.tool_name ||
+    raw.toolName ||
+    raw.item?.name ||
+    raw.item?.tool_name ||
+    raw.function?.name ||
+    raw.payload?.function?.name ||
+    raw.params?.name ||
+    trace?.title?.replace(/^Tool call:\s*/i, "").trim() ||
+    trace?.title ||
+    "Tool";
+}
+
+function extractToolId(trace) {
+  const raw = trace?.raw || {};
+  return raw.id || raw.tool_use_id || raw.toolUseId || raw.item?.id || raw.item?.call_id || null;
+}
+
+function extractToolRef(trace) {
+  const raw = trace?.raw || {};
+  return raw.tool_use_id || raw.toolUseId || raw.id || raw.item?.tool_use_id || raw.item?.call_id || null;
+}
+
+function extractToolInput(trace) {
+  const raw = trace?.raw || {};
+  return raw.input ??
+    raw.arguments ??
+    raw.item?.arguments ??
+    raw.item?.input ??
+    raw.function?.arguments ??
+    raw.payload?.function?.arguments ??
+    raw.params?.arguments ??
+    trace?.content ??
+    null;
+}
+
+function extractToolOutput(trace) {
+  const raw = trace?.raw || {};
+  return raw.result ??
+    raw.output ??
+    raw.content ??
+    raw.item?.output ??
+    raw.item?.result ??
+    raw.item?.content ??
+    raw.item?.message ??
+    raw.payload?.result ??
+    raw.payload?.output ??
+    raw.params?.result ??
+    trace?.content ??
+    null;
+}
+
+function extractCommand(value) {
+  const entry = findNestedEntry(value, (key) => ["cmd", "command", "bash_command", "shell_command"].includes(String(key).toLowerCase()));
+  return entry ? String(entry.value ?? "").trim() : "";
+}
+
+function extractDuration(value) {
+  const entry = findNestedEntry(value, (key) =>
+    ["duration", "duration_ms", "durationms", "elapsed", "elapsed_ms", "elapsedms", "latency_ms", "latencyms"].includes(String(key).toLowerCase())
+  );
+  if (!entry) return null;
+  if (typeof entry.value === "string" && entry.value.trim()) return entry.value.trim();
+  if (typeof entry.value === "number") {
+    const key = entry.key.toLowerCase();
+    return key.includes("ms") ? `${Math.round(entry.value)}ms` : formatElapsedSeconds(entry.value);
+  }
+  return null;
+}
+
+function extractExitCode(value) {
+  const entry = findNestedEntry(value, (key) => ["exit_code", "exitcode", "returncode"].includes(String(key).toLowerCase()));
+  if (!entry) return null;
+  const numeric = Number(entry.value);
+  return Number.isFinite(numeric) ? numeric : String(entry.value ?? "");
+}
+
+function extractTraceDuration(trace) {
+  return extractDuration(trace?.raw) || extractDuration(trace?.content);
+}
+
+function extractTraceExitCode(trace) {
+  const fromRaw = extractExitCode(trace?.raw);
+  return fromRaw ?? extractExitCode(trace?.content);
+}
+
+function isErrorTrace(trace) {
+  const raw = trace?.raw || {};
+  const title = String(trace?.title || "").toLowerCase();
+  const kind = String(trace?.kind || "").toLowerCase();
+  return kind.includes("error") ||
+    title.includes("error") ||
+    raw.item?.type === "error" ||
+    raw.error !== undefined ||
+    trace?.source === "stderr";
+}
+
+function isToolUseTrace(trace) {
+  return ["tool_use", "tool_call", "toolcall"].includes(trace?.kind);
+}
+
+function isToolResultTrace(trace) {
+  return ["tool_result", "toolresult"].includes(trace?.kind);
+}
+
+function classifyToolType(name, isError = false) {
+  if (isError) return "error";
+  const lower = String(name || "").toLowerCase();
+  if (["exec", "command", "bash", "shell", "terminal", "run"].some((token) => lower.includes(token))) return "exec";
+  if (["write", "edit", "patch", "apply", "create", "update", "delete", "modify"].some((token) => lower.includes(token))) return "write";
+  if (["read", "open", "find", "search", "list", "view", "fetch", "grep", "rg", "cat"].some((token) => lower.includes(token))) return "read";
+  return "read";
+}
+
+function toolIcon(type) {
+  if (type === "exec") return ">";
+  if (type === "write") return "W";
+  if (type === "error") return "!";
+  return "R";
+}
+
+function traceTimestampMap(nodeId) {
+  return state.events
+    .filter((event) => event.node_id === nodeId && event.type === "node_trace")
+    .map((event) => event.timestamp);
+}
+
+function buildTraceEntries(nodeId, traceEvents) {
+  const timestamps = traceTimestampMap(nodeId);
+  const entries = [];
+  const pendingById = new Map();
+  let lastPending = null;
+
+  function attachResult(target, trace, timestamp) {
+    if (!target) return false;
+    target.result = extractToolOutput(trace);
+    target.resultTrace = trace;
+    target.timestamp = timestamp || target.timestamp;
+    target.duration = target.duration || extractTraceDuration(trace);
+    target.exitCode = target.exitCode ?? extractTraceExitCode(trace);
+    return true;
+  }
+
+  traceEvents.forEach((trace, index) => {
+    const timestamp = timestamps[index] || null;
+    if (isToolUseTrace(trace)) {
+      const toolName = extractToolName(trace);
+      const type = classifyToolType(toolName);
+      const entry = {
+        key: `${trace.kind || "tool"}:${index}:${toolName}`,
+        kind: "tool",
+        type,
+        label: toolName,
+        title: toolName,
+        trace,
+        timestamp,
+        duration: extractTraceDuration(trace),
+        input: extractToolInput(trace),
+        command: type === "exec" ? extractCommand(extractToolInput(trace)) : "",
+        result: null,
+        exitCode: extractTraceExitCode(trace),
+      };
+      entries.push(entry);
+      const toolId = extractToolId(trace);
+      if (toolId) pendingById.set(toolId, entry);
+      lastPending = entry;
+      return;
+    }
+
+    if (isToolResultTrace(trace)) {
+      const toolRef = extractToolRef(trace);
+      const matched = (toolRef && pendingById.get(toolRef)) || lastPending;
+      if (attachResult(matched, trace, timestamp)) return;
+    }
+
+    if (trace?.kind === "command_output" && lastPending && lastPending.type === "exec") {
+      const existing = lastPending.result ? `${String(lastPending.result).trimEnd()}\n${String(trace.content || "").trim()}` : trace.content;
+      lastPending.result = existing;
+      lastPending.timestamp = timestamp || lastPending.timestamp;
+      return;
+    }
+
+    if (trace?.kind === "item_completed" && !isErrorTrace(trace) && lastPending) {
+      lastPending.timestamp = timestamp || lastPending.timestamp;
+      lastPending.duration = lastPending.duration || extractTraceDuration(trace);
+      lastPending.exitCode = lastPending.exitCode ?? extractTraceExitCode(trace);
+      if (!lastPending.result) lastPending.result = extractToolOutput(trace);
+      return;
+    }
+
+    if (isErrorTrace(trace)) {
+      entries.push({
+        key: `${trace.kind || "error"}:${index}:${trace.title || "Error"}`,
+        kind: "error",
+        type: "error",
+        label: extractToolName(trace),
+        title: trace.title || "Error",
+        trace,
+        timestamp,
+        duration: extractTraceDuration(trace),
+        input: null,
+        command: "",
+        result: extractToolOutput(trace),
+        exitCode: extractTraceExitCode(trace),
+      });
+      return;
+    }
+
+    entries.push({
+      key: `${trace.kind || "event"}:${index}:${trace.title || trace.kind || "Trace event"}`,
+      kind: "event",
+      type: "read",
+      label: trace.title || trace.kind || "Trace event",
+      title: trace.title || trace.kind || "Trace event",
+      trace,
+      timestamp,
+      duration: extractTraceDuration(trace),
+      input: null,
+      command: "",
+      result: extractToolOutput(trace),
+      exitCode: extractTraceExitCode(trace),
+    });
+  });
+
+  return entries.slice(-25).reverse();
+}
+
+function renderTraceCard(entry) {
+  const isError = entry.type === "error";
+  const isOpen = isError || entry.open;
+  const timestamp = entry.timestamp ? formatDate(entry.timestamp) : null;
+  const exitCode = entry.exitCode;
+  const exitBadgeClass = exitCode === null || exitCode === undefined
+    ? ""
+    : Number(exitCode) === 0
+      ? "trace-pill-success"
+      : "trace-pill-failure";
+  const inputLabel = entry.trace?.kind === "tool_use" ? "Input JSON" : "Input";
+  const outputLabel = entry.trace?.kind === "tool_use" ? "Result" : "Output";
+  const inputBlock = entry.command
+    ? `
+      <div class="trace-block">
+        <div class="small">Command</div>
+        ${renderPreBlock(entry.command, "trace-command-block")}
+      </div>
+      ${renderBlock(inputLabel, entry.input, { collapsed: entry.trace?.kind === "tool_use" })}
+    `
+    : renderBlock(inputLabel, entry.input, { collapsed: entry.trace?.kind === "tool_use" });
+  const outputBlock = renderBlock(outputLabel, entry.result, {
+    collapsed: entry.trace?.kind === "tool_use" || !!entry.command || isError,
+    open: isError,
+  });
+  const rawBlock = entry.kind === "event" ? renderBlock("Raw event", entry.trace?.raw || entry.trace?.content, { collapsed: true }) : "";
+
+  return `
+    <details class="trace-card trace-card-${entry.type}" data-trace-key="${escapeHtml(entry.key)}"${isOpen ? " open" : ""}>
+      <summary>
+        <span class="trace-tool-icon trace-tool-icon-${entry.type}">${toolIcon(entry.type)}</span>
+        <span class="trace-card-header">
+          <strong>${escapeHtml(entry.title)}</strong>
+          <span class="trace-card-meta">
+            ${entry.duration ? `<span class="trace-pill">${escapeHtml(entry.duration)}</span>` : ""}
+            ${timestamp ? `<span class="small">${escapeHtml(timestamp)}</span>` : ""}
+            ${exitCode !== null && exitCode !== undefined ? `<span class="trace-pill ${exitBadgeClass}">exit ${escapeHtml(String(exitCode))}</span>` : ""}
+          </span>
+        </span>
+      </summary>
+      <div class="trace-card-body">
+        ${inputBlock}
+        ${outputBlock}
+        ${rawBlock}
+      </div>
+    </details>
+  `;
+}
+
+function renderLifecycleEvent(event) {
+  return `
+    <div class="summary-card">
+      <div><strong>${escapeHtml(event.type)}</strong></div>
+      <div class="small">${escapeHtml(formatDate(event.timestamp))}</div>
+      ${renderPreBlock(event.data || {})}
+    </div>
+  `;
+}
+
+async function renderDetail() {
+  ensureDetailEnhancements();
+  const detail = document.getElementById("detail");
+  const previousScrollTop = detail.scrollTop;
+  const openTraceKeys = new Set(Array.from(detail.querySelectorAll(".trace-card[open]")).map((card) => card.dataset.traceKey));
+  const selectedNodeId = state.selectedNodeId;
+  const selectedArtifact = state.selectedArtifact;
+  const selected = selectedNodeId && state.nodes[selectedNodeId];
+  document.getElementById("selected-node").textContent = selectedNodeId || "None selected";
+
+  let nodeChanged = false;
+  if (state.detailScrollNodeId !== selectedNodeId) {
+    nodeChanged = true;
+    state.detailScrollNodeId = selectedNodeId;
+    state.detailAutoScroll = true;
+    state.detailEventSignature = null;
+  }
+
+  if (!selected || !selectedNodeId) {
     detail.innerHTML = '<p class="small">Select a node to inspect its output, attempts, artifacts, and parsed timeline.</p>';
     return;
   }
 
   let artifactText = "";
   try {
-    artifactText = await fetchArtifact(state.selectedNodeId, state.selectedArtifact);
+    artifactText = await fetchArtifact(selectedNodeId, selectedArtifact);
   } catch {
     artifactText = selected.output || "";
   }
+  if (state.selectedNodeId !== selectedNodeId || state.selectedArtifact !== selectedArtifact) return;
 
   const attemptRows = (selected.attempts || []).map((attempt) => `
     <div class="summary-card">
@@ -637,7 +1220,15 @@ async function renderDetail() {
     </div>
   `).join("");
 
-  const events = state.events.filter((event) => event.node_id === state.selectedNodeId).slice(-25).reverse();
+  const lifecycleEventRows = state.events.filter((event) => event.node_id === selectedNodeId && event.type !== "node_trace");
+  const lifecycleEvents = lifecycleEventRows.slice(-12).reverse();
+  const traceCards = buildTraceEntries(selectedNodeId, selected.trace_events || []);
+  traceCards.forEach((entry) => {
+    entry.open = openTraceKeys.has(entry.key);
+  });
+  const nextEventSignature = `${selectedNodeId}:${(selected.trace_events || []).length}:${lifecycleEventRows.length}`;
+  const shouldAutoScroll = state.detailAutoScroll && state.detailEventSignature !== null && state.detailEventSignature !== nextEventSignature;
+
   detail.innerHTML = `
     <div class="summary-grid">
       <div class="summary-card"><div class="small">Status</div><strong>${escapeHtml(selected.status || "pending")}</strong></div>
@@ -650,7 +1241,7 @@ async function renderDetail() {
       <div class="summary-grid">${attemptRows || '<div class="small">No attempts yet.</div>'}</div>
     </div>
     <div class="trace-item">
-      <h4>Artifact: ${escapeHtml(state.selectedArtifact)}</h4>
+      <h4>Artifact: ${escapeHtml(selectedArtifact)}</h4>
       <div class="output-box">${escapeHtml(artifactText)}</div>
     </div>
     <div class="trace-item">
@@ -658,16 +1249,31 @@ async function renderDetail() {
       <div class="output-box">${escapeHtml((selected.success_details || []).join("\n"))}</div>
     </div>
     <div class="trace-item">
-      <h4>Recent events</h4>
-      ${events.map((event) => `
-        <div class="summary-card">
-          <div><strong>${escapeHtml(event.type)}</strong></div>
-          <div class="small">${escapeHtml(formatDate(event.timestamp))}</div>
-          <div class="output-box">${escapeHtml(JSON.stringify(event.data || {}, null, 2))}</div>
-        </div>
-      `).join("") || '<div class="small">No node-specific events yet.</div>'}
+      <h4>Trace Timeline</h4>
+      <div class="trace-stack">
+        ${traceCards.map((entry) => renderTraceCard(entry)).join("") || '<div class="trace-empty">No parsed tool or trace activity yet.</div>'}
+      </div>
+    </div>
+    <div class="trace-item">
+      <h4>Lifecycle Events</h4>
+      ${lifecycleEvents.map((event) => renderLifecycleEvent(event)).join("") || '<div class="small">No node-specific lifecycle events yet.</div>'}
     </div>
   `;
+
+  state.detailEventSignature = nextEventSignature;
+  if (shouldAutoScroll) {
+    window.requestAnimationFrame(() => {
+      detail.scrollTop = detail.scrollHeight;
+    });
+  } else if (nodeChanged) {
+    window.requestAnimationFrame(() => {
+      detail.scrollTop = 0;
+    });
+  } else {
+    window.requestAnimationFrame(() => {
+      detail.scrollTop = previousScrollTop;
+    });
+  }
 }
 
 function applyEvent(event) {

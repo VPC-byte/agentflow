@@ -63,6 +63,27 @@
         color: var(--link);
       }
 
+      .skip-link {
+        position: absolute;
+        left: 24px;
+        top: 0;
+        z-index: 30;
+        padding: 10px 14px;
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        background: rgba(13, 17, 23, 0.96);
+        color: #f0f6fc;
+        text-decoration: none;
+        transform: translateY(-150%);
+        transition: transform 0.18s ease;
+      }
+
+      .skip-link:focus {
+        transform: translateY(16px);
+        outline: 2px solid rgba(88, 166, 255, 0.5);
+        outline-offset: 2px;
+      }
+
       button,
       input,
       textarea {
@@ -335,6 +356,14 @@
         box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.12);
       }
 
+      .run-item:focus-visible {
+        outline: none;
+        border-color: rgba(88, 166, 255, 0.42);
+        box-shadow:
+          inset 0 0 0 1px rgba(88, 166, 255, 0.12),
+          0 0 0 3px rgba(88, 166, 255, 0.12);
+      }
+
       .run-item h3 {
         margin: 0;
         font-size: 0.9rem;
@@ -390,6 +419,11 @@
         border-radius: 20px;
         border: 1px solid var(--border);
         background: linear-gradient(180deg, rgba(13, 17, 23, 0.82), rgba(1, 4, 9, 0.96));
+      }
+
+      #main-content:focus {
+        outline: 2px solid rgba(88, 166, 255, 0.5);
+        outline-offset: 6px;
       }
 
       .graph-backdrop {
@@ -634,48 +668,49 @@
     </style>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to pipeline graph</a>
     <div class="app-shell">
       <header class="topbar">
         <div class="brand">
           <h1>AgentFlow</h1>
         </div>
-        <div class="status-strip">
-          <div class="metric"><span>Total Runs</span><strong id="metric-total">0</strong></div>
-          <div class="metric"><span>Queued</span><strong id="metric-queued">0</strong></div>
-          <div class="metric"><span>Live</span><strong id="metric-running">0</strong></div>
+        <div class="status-strip" aria-label="Run metrics">
+          <div class="metric" aria-label="Total runs metric"><span>Total Runs</span><strong id="metric-total" aria-label="Total runs" aria-live="polite" aria-atomic="true">0</strong></div>
+          <div class="metric" aria-label="Queued runs metric"><span>Queued</span><strong id="metric-queued" aria-label="Queued runs" aria-live="polite" aria-atomic="true">0</strong></div>
+          <div class="metric" aria-label="Live runs metric"><span>Live</span><strong id="metric-running" aria-label="Live runs" aria-live="polite" aria-atomic="true">0</strong></div>
         </div>
       </header>
 
-      <div id="banner" class="banner hidden"></div>
+      <div id="banner" class="banner hidden" role="status" aria-label="Application status banner" aria-live="polite" aria-atomic="true"></div>
 
-      <main class="layout">
-        <aside class="panel history-panel">
+      <div class="layout">
+        <aside class="panel history-panel" role="navigation" aria-label="Run history sidebar">
           <div class="panel-header">
             <div class="panel-title">
               <h2>Run History</h2>
               <strong>Recent executions</strong>
             </div>
           </div>
-          <div class="search-row">
-            <input id="run-search" class="search" type="search" placeholder="Search runs, status, or IDs">
-            <button id="refresh-runs" type="button">Refresh</button>
+          <div class="search-row" aria-label="Run history controls">
+            <input id="run-search" class="search" type="search" placeholder="Search runs, status, or IDs" aria-label="Search runs by name, status, or ID">
+            <button id="refresh-runs" type="button" aria-label="Refresh run history">Refresh</button>
           </div>
-          <div id="runs"></div>
+          <div id="runs" role="listbox" aria-label="Run history list"></div>
         </aside>
 
-        <section class="panel graph-panel">
+        <section id="main-content" class="panel graph-panel" role="main" tabindex="-1" aria-label="Pipeline execution graph panel">
           <div class="panel-header">
             <div class="panel-title">
               <h2>Execution Graph</h2>
               <strong id="run-meta">No run selected</strong>
             </div>
-            <div class="button-row">
-              <span id="run-status" class="status-pill">idle</span>
-              <button id="cancel-run" type="button">Cancel</button>
-              <button id="rerun-run" type="button">Rerun</button>
+            <div class="button-row" aria-label="Run action controls">
+              <span id="run-status" class="status-pill" aria-label="Current run status" aria-live="polite" aria-atomic="true">idle</span>
+              <button id="cancel-run" type="button" aria-label="Cancel current run">Cancel</button>
+              <button id="rerun-run" type="button" aria-label="Rerun current pipeline">Rerun</button>
             </div>
           </div>
-          <div class="graph-stage">
+          <div class="graph-stage" aria-label="Pipeline graph stage">
             <svg class="graph-backdrop" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
               <defs>
                 <pattern id="graph-grid" width="10" height="10" patternUnits="userSpaceOnUse">
@@ -690,35 +725,248 @@
               <rect width="100" height="100" fill="url(#graph-glow)"></rect>
               <rect width="100" height="100" fill="url(#graph-grid)"></rect>
             </svg>
-            <div id="graph" aria-live="polite"></div>
+            <div id="graph" aria-label="Interactive pipeline graph viewport"></div>
           </div>
         </section>
 
-        <aside class="panel detail-panel">
+        <aside class="panel detail-panel" role="complementary" aria-label="Node detail panel" aria-live="polite">
           <div class="panel-header">
             <div class="panel-title">
               <h2>Node Detail</h2>
-              <strong id="selected-node">None selected</strong>
+              <strong id="selected-node" aria-label="Selected node" aria-live="polite" aria-atomic="true">None selected</strong>
             </div>
           </div>
-          <div class="artifact-rail">
-            <button data-artifact="output.txt" class="artifact-button" type="button">Output</button>
-            <button data-artifact="launch.json" class="artifact-button" type="button">Launch</button>
-            <button data-artifact="stdout.log" class="artifact-button" type="button">Stdout</button>
-            <button data-artifact="stderr.log" class="artifact-button" type="button">Stderr</button>
-            <button data-artifact="trace.jsonl" class="artifact-button" type="button">Trace</button>
+          <div class="artifact-rail" aria-label="Artifact view controls">
+            <button data-artifact="output.txt" class="artifact-button" type="button" aria-label="View output artifact">Output</button>
+            <button data-artifact="launch.json" class="artifact-button" type="button" aria-label="View launch artifact">Launch</button>
+            <button data-artifact="stdout.log" class="artifact-button" type="button" aria-label="View standard output artifact">Stdout</button>
+            <button data-artifact="stderr.log" class="artifact-button" type="button" aria-label="View standard error artifact">Stderr</button>
+            <button data-artifact="trace.jsonl" class="artifact-button" type="button" aria-label="View trace artifact">Trace</button>
           </div>
-          <div id="detail"></div>
+          <div id="detail" aria-label="Selected node details" aria-live="polite"></div>
         </aside>
-      </main>
+      </div>
 
-      <button id="load-example" type="button" hidden>Load example</button>
-      <button id="validate-pipeline" type="button" hidden>Validate</button>
-      <button id="run-pipeline" type="button" hidden>Run pipeline</button>
+      <button id="load-example" type="button" hidden aria-label="Load example pipeline">Load example</button>
+      <button id="validate-pipeline" type="button" hidden aria-label="Validate pipeline">Validate</button>
+      <button id="run-pipeline" type="button" hidden aria-label="Run pipeline">Run pipeline</button>
       <input id="pipeline-base-dir" type="hidden" value="{{ base_dir }}">
       <textarea id="pipeline-input" hidden>{{ example }}</textarea>
     </div>
 
     <script src="/static/app.js"></script>
+    <script>
+      (() => {
+        const runs = document.getElementById("runs");
+        const graph = document.getElementById("graph");
+        const detail = document.getElementById("detail");
+        const selectedNode = document.getElementById("selected-node");
+        const runStatus = document.getElementById("run-status");
+        const banner = document.getElementById("banner");
+
+        function cleanText(value) {
+          return String(value || "").replace(/\s+/g, " ").trim();
+        }
+
+        function lowerText(value) {
+          return cleanText(value).toLowerCase();
+        }
+
+        function assignButtonLabels() {
+          const staticLabels = {
+            "refresh-runs": "Refresh run history",
+            "cancel-run": "Cancel current run",
+            "rerun-run": "Rerun current pipeline",
+            "load-example": "Load example pipeline",
+            "validate-pipeline": "Validate pipeline",
+            "run-pipeline": "Run pipeline",
+          };
+
+          document.querySelectorAll("button").forEach((button) => {
+            if (button.dataset.openRun) {
+              const runItem = button.closest(".run-item");
+              const runName = cleanText(runItem?.querySelector("h3")?.textContent) || "pipeline run";
+              button.setAttribute("aria-label", `Open run ${button.dataset.openRun} for ${runName}`);
+              return;
+            }
+            if (button.dataset.artifact) {
+              const artifactName = button.dataset.artifact.replace(/\.(jsonl|json|txt|log)$/u, "");
+              button.setAttribute("aria-label", `View ${artifactName.replaceAll("-", " ")} artifact`);
+              return;
+            }
+            if (staticLabels[button.id]) {
+              button.setAttribute("aria-label", staticLabels[button.id]);
+              return;
+            }
+            if (!button.hasAttribute("aria-label")) {
+              const fallback = cleanText(button.textContent) || cleanText(button.id).replaceAll("-", " ");
+              if (fallback) button.setAttribute("aria-label", fallback);
+            }
+          });
+        }
+
+        function enhanceRuns() {
+          const runItems = runs.querySelectorAll(".run-item");
+          let activeDescendant = "";
+
+          runItems.forEach((item, index) => {
+            const isSelected = item.classList.contains("active");
+            const optionId = item.id || `run-option-${index + 1}`;
+            const title = cleanText(item.querySelector("h3")?.textContent) || `Run ${index + 1}`;
+            const runId = cleanText(item.querySelector(".mono")?.textContent) || cleanText(item.querySelector("button[data-open-run]")?.dataset.openRun);
+            const details = Array.from(item.querySelectorAll(":scope > .small"))
+              .map((node) => cleanText(node.textContent))
+              .filter(Boolean);
+            const openButton = item.querySelector("button[data-open-run]");
+
+            item.id = optionId;
+            item.setAttribute("role", "option");
+            item.setAttribute("tabindex", "0");
+            item.setAttribute("aria-selected", isSelected ? "true" : "false");
+            item.setAttribute("aria-label", [title, runId, ...details].filter(Boolean).join(". "));
+
+            if (isSelected) activeDescendant = optionId;
+
+            if (!item.dataset.ariaBound) {
+              item.addEventListener("click", (event) => {
+                if (event.target.closest("button")) return;
+                openButton?.click();
+              });
+              item.addEventListener("keydown", (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                openButton?.click();
+              });
+              item.dataset.ariaBound = "true";
+            }
+          });
+
+          if (activeDescendant) {
+            runs.setAttribute("aria-activedescendant", activeDescendant);
+          } else {
+            runs.removeAttribute("aria-activedescendant");
+          }
+        }
+
+        function graphSummary(svg, nodeGroups) {
+          const dependencyCount = svg.querySelectorAll('path[marker-end="url(#graph-arrow)"]').length;
+          const restartCount = svg.querySelectorAll('path[marker-end="url(#graph-arrow-cycle)"]').length;
+          const selectedNodeId = cleanText(selectedNode.textContent);
+          const statusCounts = {};
+
+          nodeGroups.forEach((group) => {
+            const statusText = lowerText(group.querySelectorAll("text")[1]?.textContent) || "pending";
+            statusCounts[statusText] = (statusCounts[statusText] || 0) + 1;
+          });
+
+          const statusSummary = Object.entries(statusCounts)
+            .map(([status, count]) => `${count} ${status}`)
+            .join(", ");
+
+          return [
+            `Pipeline graph with ${nodeGroups.length} nodes`,
+            dependencyCount ? `${dependencyCount} dependency connections` : "no dependency connections",
+            restartCount ? `${restartCount} restart paths` : null,
+            statusSummary ? `Statuses: ${statusSummary}` : null,
+            selectedNodeId && selectedNodeId !== "None selected" ? `Selected node ${selectedNodeId}` : "No node selected",
+          ].filter(Boolean).join(". ");
+        }
+
+        function enhanceGraph() {
+          const svg = graph.querySelector("svg");
+          const nodeGroups = Array.from(graph.querySelectorAll("[data-node-id]"));
+          const selectedNodeId = cleanText(selectedNode.textContent);
+
+          if (!svg || !nodeGroups.length) {
+            graph.setAttribute("aria-label", "Interactive pipeline graph viewport with no rendered pipeline");
+            return;
+          }
+
+          const summary = graphSummary(svg, nodeGroups);
+          svg.setAttribute("role", "img");
+          svg.setAttribute("aria-label", summary);
+          graph.setAttribute("aria-label", summary);
+
+          nodeGroups.forEach((group, index) => {
+            const textNodes = Array.from(group.querySelectorAll("text")).map((node) => cleanText(node.textContent)).filter(Boolean);
+            const [title, status, attempts, agent] = textNodes;
+            const isSelected = group.dataset.nodeId === selectedNodeId;
+
+            group.setAttribute("tabindex", "0");
+            group.setAttribute("focusable", "true");
+            group.setAttribute("role", "button");
+            group.setAttribute("aria-selected", isSelected ? "true" : "false");
+            group.setAttribute(
+              "aria-label",
+              [
+                title || `Node ${index + 1}`,
+                status ? `Status ${lowerText(status)}` : null,
+                attempts,
+                agent ? `Agent ${agent}` : null,
+              ].filter(Boolean).join(". ")
+            );
+
+            if (!group.dataset.ariaBound) {
+              group.addEventListener("keydown", (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                group.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+              });
+              group.dataset.ariaBound = "true";
+            }
+          });
+        }
+
+        function enhanceToolCalls() {
+          detail.querySelectorAll(".tool-call, details.trace-item, details.tool-call").forEach((card, index) => {
+            const title = cleanText(card.querySelector("summary, h4, button")?.textContent) || `Tool call ${index + 1}`;
+            const expanded = card.matches("details") ? card.open : !card.hasAttribute("hidden");
+
+            card.setAttribute("aria-label", title);
+            card.setAttribute("aria-expanded", expanded ? "true" : "false");
+
+            const toggle = card.querySelector("summary, button[aria-controls], button[data-toggle]");
+            if (toggle) {
+              toggle.setAttribute("aria-label", `Toggle ${title}`);
+              toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+            }
+
+            if (card.matches("details") && !card.dataset.ariaBound) {
+              card.addEventListener("toggle", () => {
+                const nextExpanded = card.open ? "true" : "false";
+                card.setAttribute("aria-expanded", nextExpanded);
+                card.querySelector("summary")?.setAttribute("aria-expanded", nextExpanded);
+              });
+              card.dataset.ariaBound = "true";
+            }
+          });
+        }
+
+        let scheduled = false;
+        function runEnhancements() {
+          scheduled = false;
+          assignButtonLabels();
+          enhanceRuns();
+          enhanceGraph();
+          enhanceToolCalls();
+        }
+
+        function scheduleEnhancements() {
+          if (scheduled) return;
+          scheduled = true;
+          window.requestAnimationFrame(runEnhancements);
+        }
+
+        [runs, graph, detail, selectedNode, runStatus, banner].forEach((node) => {
+          new MutationObserver(scheduleEnhancements).observe(node, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+          });
+        });
+
+        runEnhancements();
+      })();
+    </script>
   </body>
 </html>
