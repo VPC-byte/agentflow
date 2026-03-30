@@ -12,6 +12,7 @@ const state = {
   detailAutoScroll: true,
   detailScrollNodeId: null,
   detailEventSignature: null,
+  detailTab: null,
 };
 
 async function api(path, options = {}) {
@@ -45,6 +46,15 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;");
 }
 
+function renderEmptyState(message) {
+  return `
+    <div class="empty-state">
+      <span class="empty-state-icon" aria-hidden="true"></span>
+      <span class="empty-state-text">${escapeHtml(message)}</span>
+    </div>
+  `;
+}
+
 function formatDate(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
@@ -60,34 +70,29 @@ function currentRun() {
 }
 
 function topoLevels(nodes) {
-  const nodeIds = new Set(nodes.map((node) => node.id));
-  const indegree = Object.fromEntries(nodes.map((node) => [node.id, 0]));
-  const outgoing = Object.fromEntries(nodes.map((node) => [node.id, []]));
+  const normalizedNodes = Array.isArray(nodes)
+    ? nodes.filter((node) => node && typeof node.id === "string" && node.id)
+    : [];
+  const nodeIds = new Set(normalizedNodes.map((node) => node.id));
+  const dependencies = Object.fromEntries(normalizedNodes.map((node) => [
+    node.id,
+    Array.from(new Set((Array.isArray(node.depends_on) ? node.depends_on : []).filter((dependency) => nodeIds.has(dependency)))),
+  ]));
   const levels = {};
+  const visiting = new Set();
 
-  nodes.forEach((node) => {
-    for (const dependency of node.depends_on || []) {
-      if (!nodeIds.has(dependency)) continue;
-      indegree[node.id] += 1;
-      outgoing[dependency].push(node.id);
-    }
-  });
-
-  const queue = nodes.filter((node) => indegree[node.id] === 0).map((node) => node.id);
-  while (queue.length) {
-    const id = queue.shift();
-    levels[id] = levels[id] ?? 0;
-    for (const next of outgoing[id]) {
-      levels[next] = Math.max(levels[next] ?? 0, levels[id] + 1);
-      indegree[next] -= 1;
-      if (indegree[next] === 0) queue.push(next);
-    }
+  function visit(nodeId) {
+    if (levels[nodeId] !== undefined) return levels[nodeId];
+    if (visiting.has(nodeId)) return levels[nodeId] ?? 0;
+    visiting.add(nodeId);
+    const dependencyLevels = (dependencies[nodeId] || []).map((dependency) => visit(dependency));
+    visiting.delete(nodeId);
+    levels[nodeId] = dependencyLevels.length ? Math.max(...dependencyLevels) + 1 : 0;
+    return levels[nodeId];
   }
 
-  nodes.forEach((node) => {
-    if (levels[node.id] !== undefined) return;
-    const dependencyLevels = (node.depends_on || []).map((dependency) => levels[dependency] ?? 0);
-    levels[node.id] = dependencyLevels.length ? Math.max(...dependencyLevels) + 1 : 0;
+  normalizedNodes.forEach((node) => {
+    visit(node.id);
   });
 
   return levels;
@@ -101,14 +106,14 @@ const graphViewState = {
 };
 
 const GRAPH_STATUS_COLORS = {
-  pending: "#8b949e",
-  queued: "#8b949e",
-  skipped: "#8b949e",
+  pending: "#d0d7de",
+  queued: "#d0d7de",
+  skipped: "#d0d7de",
   running: "#d29922",
   retrying: "#d29922",
-  completed: "#3fb950",
-  failed: "#f85149",
-  cancelled: "#f85149",
+  completed: "#1a7f37",
+  failed: "#cf222e",
+  cancelled: "#cf222e",
 };
 
 function graphLayoutSignature(nodes) {
@@ -271,6 +276,187 @@ function filteredRuns() {
 function renderRuns() {
   const container = document.getElementById("runs");
   const runs = filteredRuns();
+  if (!document.getElementById("runs-white-theme-styles")) {
+    const style = document.createElement("style");
+    style.id = "runs-white-theme-styles";
+    style.textContent = `
+      @keyframes runs-status-pulse {
+        0% {
+          transform: scale(1);
+          box-shadow: 0 0 0 0 rgba(191, 135, 0, 0.28);
+        }
+
+        70% {
+          transform: scale(1.06);
+          box-shadow: 0 0 0 5px rgba(191, 135, 0, 0);
+        }
+
+        100% {
+          transform: scale(1);
+          box-shadow: 0 0 0 0 rgba(191, 135, 0, 0);
+        }
+      }
+
+      #runs .runs-group {
+        display: grid;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+      }
+
+      #runs .runs-group-header {
+        margin: 0;
+        padding: 0 0.125rem;
+        color: #57606a;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        line-height: 1.4;
+        text-transform: uppercase;
+      }
+
+      #runs .run-item {
+        display: grid;
+        gap: 0.55rem;
+        margin-bottom: 0;
+        padding: 0.9rem 1rem 0.95rem 0.85rem;
+        border: 1px solid #d0d7de;
+        border-left: 4px solid transparent;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: none;
+        transition:
+          background-color 140ms ease,
+          border-color 140ms ease,
+          box-shadow 140ms ease;
+      }
+
+      #runs .run-item:hover {
+        transform: none;
+        border-color: #d0d7de;
+        background: #ddf4ff;
+        box-shadow: none;
+      }
+
+      #runs .run-item.active {
+        border-left-color: #0969da;
+        background: #ddf4ff;
+        box-shadow: none;
+      }
+
+      #runs .run-item:focus-visible {
+        outline: none;
+        border-color: #0969da;
+        border-left-color: #0969da;
+        background: #ddf4ff;
+        box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.18);
+      }
+
+      #runs .runs-title-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+
+      #runs .runs-title {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.65rem;
+        min-width: 0;
+      }
+
+      #runs .runs-title-copy {
+        display: grid;
+        gap: 0.12rem;
+        min-width: 0;
+      }
+
+      #runs .run-item h3 {
+        margin: 0;
+        color: #24292f;
+        font-size: 0.94rem;
+        font-weight: 600;
+        line-height: 1.35;
+      }
+
+      #runs .runs-id {
+        color: #57606a;
+        font-size: 0.72rem;
+        line-height: 1.4;
+      }
+
+      #runs .runs-status-label,
+      #runs .runs-meta,
+      #runs .runs-progress-meta {
+        color: #57606a;
+        font-size: 0.74rem;
+        line-height: 1.45;
+      }
+
+      #runs .runs-status-label {
+        text-transform: capitalize;
+        white-space: nowrap;
+      }
+
+      #runs .runs-meta,
+      #runs .runs-progress-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.4rem 0.75rem;
+      }
+
+      #runs .runs-meta-copy {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.35rem;
+      }
+
+      #runs .runs-status-dot {
+        width: 0.58rem;
+        height: 0.58rem;
+        flex: 0 0 auto;
+        margin-top: 0.24rem;
+        border-radius: 999px;
+        background: #8c959f;
+      }
+
+      #runs .runs-status-dot.completed {
+        background: #1a7f37;
+      }
+
+      #runs .runs-status-dot.failed {
+        background: #cf222e;
+      }
+
+      #runs .runs-status-dot.running {
+        background: #bf8700;
+        animation: runs-status-pulse 1.4s ease-in-out infinite;
+      }
+
+      #runs .runs-progress {
+        display: grid;
+        gap: 0.35rem;
+        margin-top: 0.05rem;
+      }
+
+      #runs .runs-progress-track {
+        height: 4px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #eaeef2;
+      }
+
+      #runs .runs-progress-fill {
+        height: 100%;
+        border-radius: 999px;
+        background: #1a7f37;
+      }
+    `;
+    document.head.appendChild(style);
+  }
   if (!runs.length) {
     container.innerHTML = '<div class="small">No runs yet.</div>';
     return;
@@ -311,40 +497,52 @@ function renderRuns() {
 
     return `
       <section
-        class="small"
-        style="grid-column:1 / -1;display:grid;gap:0.4rem;margin-top:0.1rem"
+        class="runs-progress"
         aria-label="Run progress ${progressedNodes} of ${totalNodes} nodes"
       >
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem">
+        <div class="runs-progress-meta">
           <span>Progress</span>
           <span>${progressedNodes}/${totalNodes} nodes</span>
         </div>
-        <div
-          aria-hidden="true"
-          style="height:7px;border-radius:999px;overflow:hidden;background:rgba(139, 148, 158, 0.16);border:1px solid rgba(210, 153, 34, 0.22)"
-        >
-          <div style="height:100%;width:${progressPercent}%;background:linear-gradient(90deg, rgba(210, 153, 34, 0.88), rgba(88, 166, 255, 0.92))"></div>
+        <div class="runs-progress-track" aria-hidden="true">
+          <div class="runs-progress-fill" style="width:${progressPercent}%"></div>
         </div>
       </section>
     `;
   };
 
+  const statusClass = (status) => {
+    const normalizedStatus = String(status || "").toLowerCase();
+    if (["completed"].includes(normalizedStatus)) return "completed";
+    if (["failed", "cancelled"].includes(normalizedStatus)) return "failed";
+    if (["running", "cancelling", "retrying"].includes(normalizedStatus)) return "running";
+    return "pending";
+  };
+
   container.innerHTML = ["Today", "Yesterday", "Older"]
     .filter((label) => groups[label].length)
     .map((label) => `
-      <section aria-label="${label} runs">
-        <div
-          class="small"
-          style="position:sticky;top:0;z-index:2;padding:0.45rem 0.75rem;margin:0 0 0.8rem;border:1px solid var(--border);border-radius:999px;background:rgba(13, 17, 23, 0.94);backdrop-filter:blur(10px);text-transform:uppercase;letter-spacing:0.12em"
-        >
-          ${label}
-        </div>
+      <section class="runs-group" aria-label="${label} runs">
+        <div class="runs-group-header">${label}</div>
         ${groups[label].map((run) => `
           <div class="run-item ${run.id === state.runId ? "active" : ""}">
-            <h3>${escapeHtml(run.pipeline.name)}</h3>
-            <div class="small mono">${run.id}</div>
-            <div class="small">Status: ${escapeHtml(run.status)} · Started: ${escapeHtml(formatDate(run.started_at || run.created_at))}</div>
-            <div class="small">Duration: ${escapeHtml(formatDuration(run))}</div>
+            <div class="runs-title-row">
+              <div class="runs-title">
+                <span class="runs-status-dot ${statusClass(run.status)}" aria-hidden="true"></span>
+                <div class="runs-title-copy">
+                  <h3>${escapeHtml(run.pipeline.name)}</h3>
+                  <div class="runs-id small mono">${escapeHtml(run.id)}</div>
+                </div>
+              </div>
+              <div class="runs-status-label">${escapeHtml(run.status)}</div>
+            </div>
+            <div class="runs-meta">
+              <div class="runs-meta-copy">
+                <span>Started: ${escapeHtml(formatDate(run.started_at || run.created_at))}</span>
+                <span aria-hidden="true">·</span>
+                <span>Duration: ${escapeHtml(formatDuration(run))}</span>
+              </div>
+            </div>
             ${renderProgress(run)}
             <div class="button-row" style="margin-top:0.65rem">
               <button data-open-run="${run.id}">Open</button>
@@ -374,7 +572,17 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
   container.innerHTML = "";
 
   const pipeline = state.pipeline || state.validationPipeline;
-  const nodes = pipelineNodes || pipeline?.nodes || [];
+  const pipelineNodeList = Array.isArray(pipeline?.nodes) ? pipeline.nodes : [];
+  const requestedNodeList = Array.isArray(pipelineNodes) ? pipelineNodes : pipelineNodeList;
+  const seenNodeIds = new Set();
+  const nodes = [];
+  const appendNode = (node) => {
+    if (!node || typeof node.id !== "string" || !node.id || seenNodeIds.has(node.id)) return;
+    seenNodeIds.add(node.id);
+    nodes.push(node);
+  };
+  pipelineNodeList.forEach(appendNode);
+  if (requestedNodeList !== pipelineNodeList) requestedNodeList.forEach(appendNode);
   const nodeMap = nodeStatusMap || state.nodes;
   if (!nodes.length) {
     container.innerHTML = '<p class="small" style="padding:1rem">Validate or run a pipeline to render the DAG.</p>';
@@ -400,14 +608,13 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
   });
 
   const ns = "http://www.w3.org/2000/svg";
-  const rootStyles = getComputedStyle(document.documentElement);
-  const primaryColor = rootStyles.getPropertyValue("--primary").trim() || "#38bdf8";
-  const borderColor = rootStyles.getPropertyValue("--border").trim() || "#334155";
-  const panelColor = rootStyles.getPropertyValue("--panel").trim() || "#111827";
-  const textColor = rootStyles.getPropertyValue("--text").trim() || "#e5e7eb";
-  const mutedColor = rootStyles.getPropertyValue("--muted").trim() || "#94a3b8";
-  const badgeFill = "rgba(56, 189, 248, 0.14)";
-  const badgeStroke = "rgba(56, 189, 248, 0.45)";
+  const edgeColor = "#656d76";
+  const selectedColor = "#0969da";
+  const nodeFill = "#ffffff";
+  const nodeText = "#1f2328";
+  const badgeFill = "#f6f8fa";
+  const badgeStroke = "#d0d7de";
+  const badgeTextColor = "#656d76";
   const svg = document.createElementNS(ns, "svg");
 
   svg.setAttribute("viewBox", `0 0 ${layout.sceneWidth} ${layout.sceneHeight}`);
@@ -436,8 +643,22 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
     marker.appendChild(arrow);
     return marker;
   };
-  defs.appendChild(createMarker("graph-arrow", borderColor));
-  defs.appendChild(createMarker("graph-arrow-cycle", "#f85149"));
+  const selectedShadow = document.createElementNS(ns, "filter");
+  selectedShadow.setAttribute("id", "graph-selected-shadow");
+  selectedShadow.setAttribute("x", "-20%");
+  selectedShadow.setAttribute("y", "-20%");
+  selectedShadow.setAttribute("width", "140%");
+  selectedShadow.setAttribute("height", "160%");
+  const dropShadow = document.createElementNS(ns, "feDropShadow");
+  dropShadow.setAttribute("dx", "0");
+  dropShadow.setAttribute("dy", "1");
+  dropShadow.setAttribute("stdDeviation", "2");
+  dropShadow.setAttribute("flood-color", selectedColor);
+  dropShadow.setAttribute("flood-opacity", "0.18");
+  selectedShadow.appendChild(dropShadow);
+  defs.appendChild(selectedShadow);
+  defs.appendChild(createMarker("graph-arrow", edgeColor));
+  defs.appendChild(createMarker("graph-arrow-cycle", edgeColor));
   svg.appendChild(defs);
 
   const background = document.createElementNS(ns, "rect");
@@ -525,11 +746,14 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
   }
 
   nodes.forEach((node) => {
-    for (const dependency of node.depends_on || []) {
+    const dependencies = Array.from(new Set(
+      (Array.isArray(node.depends_on) ? node.depends_on : []).filter((dependency) => graphViewState.positions[dependency])
+    ));
+    for (const dependency of dependencies) {
       if (!graphViewState.positions[dependency] || !graphViewState.positions[node.id]) continue;
       const edge = document.createElementNS(ns, "path");
       edge.setAttribute("fill", "none");
-      edge.setAttribute("stroke", borderColor);
+      edge.setAttribute("stroke", edgeColor);
       edge.setAttribute("stroke-width", "2");
       edge.setAttribute("stroke-linecap", "round");
       edge.setAttribute("stroke-linejoin", "round");
@@ -540,11 +764,14 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
   });
 
   nodes.forEach((node) => {
-    for (const restartTarget of node.on_failure_restart || []) {
+    const restartTargets = Array.from(new Set(
+      (Array.isArray(node.on_failure_restart) ? node.on_failure_restart : []).filter((restartTarget) => graphViewState.positions[restartTarget])
+    ));
+    for (const restartTarget of restartTargets) {
       if (!graphViewState.positions[restartTarget] || !graphViewState.positions[node.id]) continue;
       const edge = document.createElementNS(ns, "path");
       edge.setAttribute("fill", "none");
-      edge.setAttribute("stroke", "#f85149");
+      edge.setAttribute("stroke", edgeColor);
       edge.setAttribute("stroke-width", "2");
       edge.setAttribute("stroke-dasharray", "6,4");
       edge.setAttribute("stroke-linecap", "round");
@@ -571,56 +798,56 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
     group.style.cursor = "grab";
 
     const selection = document.createElementNS(ns, "rect");
-    selection.setAttribute("x", "-4");
-    selection.setAttribute("y", "-4");
-    selection.setAttribute("width", String(layout.nodeWidth + 8));
-    selection.setAttribute("height", String(layout.nodeHeight + 8));
-    selection.setAttribute("rx", "20");
+    selection.setAttribute("x", "0");
+    selection.setAttribute("y", "0");
+    selection.setAttribute("width", String(layout.nodeWidth));
+    selection.setAttribute("height", String(layout.nodeHeight));
+    selection.setAttribute("rx", "8");
     selection.setAttribute("fill", "none");
-    selection.setAttribute("stroke", primaryColor);
-    selection.setAttribute("stroke-width", "2.5");
+    selection.setAttribute("stroke", selectedColor);
+    selection.setAttribute("stroke-width", "2");
+    selection.setAttribute("filter", "url(#graph-selected-shadow)");
+    selection.setAttribute("pointer-events", "none");
     selection.setAttribute("opacity", state.selectedNodeId === node.id ? "1" : "0");
-    group.appendChild(selection);
 
     const card = document.createElementNS(ns, "rect");
     card.setAttribute("x", "0");
     card.setAttribute("y", "0");
     card.setAttribute("width", String(layout.nodeWidth));
     card.setAttribute("height", String(layout.nodeHeight));
-    card.setAttribute("rx", "16");
-    card.setAttribute("fill", panelColor);
-    card.setAttribute("fill-opacity", "0.94");
+    card.setAttribute("rx", "8");
+    card.setAttribute("fill", nodeFill);
     card.setAttribute("stroke", statusColor);
-    card.setAttribute("stroke-width", "2.5");
+    card.setAttribute("stroke-width", "2");
     group.appendChild(card);
 
     const title = document.createElementNS(ns, "text");
     title.setAttribute("x", "16");
     title.setAttribute("y", "32");
-    title.setAttribute("fill", textColor);
-    title.setAttribute("font-size", "14");
+    title.setAttribute("fill", nodeText);
+    title.setAttribute("font-size", "12");
     title.setAttribute("font-weight", "600");
-    title.setAttribute("font-family", "Inter, ui-sans-serif, system-ui, sans-serif");
+    title.setAttribute("font-family", "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
     title.textContent = truncateGraphLabel(node.id, 24);
     group.appendChild(title);
 
     const statusText = document.createElementNS(ns, "text");
     statusText.setAttribute("x", String(layout.nodeWidth - 16));
     statusText.setAttribute("y", "32");
-    statusText.setAttribute("fill", statusColor);
+    statusText.setAttribute("fill", nodeText);
     statusText.setAttribute("font-size", "11");
-    statusText.setAttribute("font-weight", "700");
+    statusText.setAttribute("font-weight", "600");
     statusText.setAttribute("text-anchor", "end");
-    statusText.setAttribute("font-family", "Inter, ui-sans-serif, system-ui, sans-serif");
+    statusText.setAttribute("font-family", "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
     statusText.textContent = truncateGraphLabel(status.toUpperCase(), 12);
     group.appendChild(statusText);
 
     const subtitle = document.createElementNS(ns, "text");
     subtitle.setAttribute("x", "16");
     subtitle.setAttribute("y", "58");
-    subtitle.setAttribute("fill", mutedColor);
+    subtitle.setAttribute("fill", nodeText);
     subtitle.setAttribute("font-size", "11");
-    subtitle.setAttribute("font-family", "Inter, ui-sans-serif, system-ui, sans-serif");
+    subtitle.setAttribute("font-family", "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
     subtitle.textContent = `Attempts ${(result.current_attempt || 0)}/${(node.retries || 0) + 1}`;
     group.appendChild(subtitle);
 
@@ -638,13 +865,14 @@ function renderGraph(pipelineNodes = null, nodeStatusMap = null) {
     const badgeText = document.createElementNS(ns, "text");
     badgeText.setAttribute("x", String(16 + badgeWidth / 2));
     badgeText.setAttribute("y", "87");
-    badgeText.setAttribute("fill", primaryColor);
+    badgeText.setAttribute("fill", badgeTextColor);
     badgeText.setAttribute("font-size", "11");
     badgeText.setAttribute("font-weight", "600");
     badgeText.setAttribute("text-anchor", "middle");
-    badgeText.setAttribute("font-family", "Inter, ui-sans-serif, system-ui, sans-serif");
+    badgeText.setAttribute("font-family", "JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace");
     badgeText.textContent = badgeLabel;
     group.appendChild(badgeText);
+    group.appendChild(selection);
 
     nodeRefs[node.id] = group;
     updateNodePosition(node.id);
@@ -969,11 +1197,17 @@ function ensureDetailEnhancements() {
       }
 
       .trace-empty {
-        padding: 0.9rem;
-        border: 1px dashed rgba(48, 54, 61, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 104px;
+        padding: 1.2rem;
+        border: 1px dashed #e5e7eb;
         border-radius: 14px;
-        color: var(--muted);
+        background: #ffffff;
+        color: #8a8f98;
         font-size: 0.76rem;
+        text-align: center;
       }
     `;
     document.head.appendChild(style);
@@ -1374,7 +1608,6 @@ async function renderDetail() {
   const previousScrollTop = detail.scrollTop;
   const openTraceKeys = new Set(Array.from(detail.querySelectorAll(".trace-card[open]")).map((card) => card.dataset.traceKey));
   const selectedNodeId = state.selectedNodeId;
-  const selectedArtifact = state.selectedArtifact;
   const selected = selectedNodeId && state.nodes[selectedNodeId];
   document.getElementById("selected-node").textContent = selectedNodeId || "None selected";
 
@@ -1391,13 +1624,29 @@ async function renderDetail() {
     return;
   }
 
-  let artifactText = "";
-  try {
-    artifactText = await fetchArtifact(selectedNodeId, selectedArtifact);
-  } catch {
-    artifactText = selected.output || "";
+  const normalizedStatus = String(selected.status || "").toLowerCase();
+  const defaultDetailTab = ["running", "retrying"].includes(normalizedStatus) ? "trace" : "output";
+  if (nodeChanged || !["output", "trace", "stdout", "stderr"].includes(state.detailTab)) {
+    state.detailTab = defaultDetailTab;
   }
-  if (state.selectedNodeId !== selectedNodeId || state.selectedArtifact !== selectedArtifact) return;
+
+  const activeTab = state.detailTab;
+  const renderDetailPre = (value, options = {}) => {
+    const {
+      emptyMessage = "Nothing to show yet.",
+      background = "#ffffff",
+      color = "#0f172a",
+      borderColor = "rgba(15, 23, 42, 0.14)",
+    } = options;
+    const normalized = maybeParseJson(value);
+    const isEmpty = value === null || value === undefined || value === "";
+    const html = isEmpty
+      ? escapeHtml(emptyMessage)
+      : isStructuredValue(normalized)
+        ? renderJsonMarkup(normalized)
+        : escapeHtml(String(value));
+    return `<pre style="margin:0;padding:1rem;border:1px solid ${borderColor};border-radius:12px;background:${background};color:${color};white-space:pre-wrap;word-break:break-word;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:0.82rem;line-height:1.55;">${html}</pre>`;
+  };
 
   const attemptRows = (selected.attempts || []).map((attempt) => `
     <div class="summary-card">
@@ -1411,6 +1660,60 @@ async function renderDetail() {
   const lifecycleEventRows = state.events.filter((event) => event.node_id === selectedNodeId && event.type !== "node_trace");
   const lifecycleEvents = lifecycleEventRows.slice(-12).reverse();
   const traceTimestamps = traceTimestampMap(selectedNodeId);
+  const getCodexItem = (trace) => trace?.raw?.item || trace?.raw?.params?.item || {};
+  const getCodexItemType = (trace) => String(getCodexItem(trace)?.type || getCodexItem(trace)?.details?.type || "").toLowerCase();
+  const isCodexCommandExecution = (trace) => {
+    const title = String(trace?.title || "").toLowerCase();
+    const itemType = getCodexItemType(trace);
+    return itemType === "command_execution" || title.includes("command_execution");
+  };
+  const isCodexAgentMessage = (trace) => {
+    const title = String(trace?.title || "").toLowerCase();
+    const itemType = getCodexItemType(trace);
+    return itemType === "agent_message" || itemType === "agentmessage" || title.includes("agent_message");
+  };
+  const isCodexLifecycleEvent = (trace) => {
+    const title = String(trace?.title || "").toLowerCase();
+    return trace?.kind === "event" && ["turn.started", "thread.started"].includes(title);
+  };
+  const extractCodexMessageText = (value) => {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      return value
+        .map((part) => extractCodexMessageText(part))
+        .filter(Boolean)
+        .join("\n\n");
+    }
+    if (typeof value === "object") {
+      return extractCodexMessageText(
+        value.text ??
+        value.output_text ??
+        value.content ??
+        value.message ??
+        value.output ??
+        value.result ??
+        ""
+      );
+    }
+    return String(value);
+  };
+  const isFileEditCommand = (command) => /\bsed\b|\bpatch\b|cat\s*>/i.test(command);
+  const extractCommandFilename = (command) => {
+    const catMatch = command.match(/cat\s*>\s*['"]?([^'"\s|;&]+)/);
+    if (catMatch) return catMatch[1];
+    const patchMatch = command.match(/\bpatch\b(?:\s+[-\w.=\/]+)*\s+['"]?([^'"\s|;&]+)/);
+    if (patchMatch) return patchMatch[1];
+    const pathMatches = [...command.matchAll(/(?:^|\s)(['"]?)([^'"`\s|;&]+(?:\/[^'"`\s|;&]+|[.][^'"`\s|;&]+))\1/g)];
+    return pathMatches.length ? pathMatches[pathMatches.length - 1][2] : "";
+  };
+  const renderHighlightedCommand = (command, filename) => {
+    if (!filename) return escapeHtml(command);
+    const start = command.indexOf(filename);
+    if (start === -1) return escapeHtml(command);
+    const end = start + filename.length;
+    return `${escapeHtml(command.slice(0, start))}<span style="display:inline-block;padding:0.04rem 0.32rem;border-radius:6px;background:rgba(245, 158, 11, 0.18);border:1px solid rgba(245, 158, 11, 0.32);color:#fef3c7;">${escapeHtml(filename)}</span>${escapeHtml(command.slice(end))}`;
+  };
   const traceCards = (selected.trace_events || [])
     .map((trace, index) => ({ trace, index, timestamp: traceTimestamps[index] || null }))
     .slice(-25)
@@ -1435,6 +1738,85 @@ async function renderDetail() {
         }
       }
 
+      if (isCodexCommandExecution(trace)) {
+        const item = getCodexItem(trace);
+        const command = String(item.command || item.details?.command || trace?.content || "(no command)").trim();
+        const exitCode = item.exit_code;
+        const output = item.aggregated_output ?? item.output ?? (trace?.kind === "item_completed" ? trace?.content ?? "" : "");
+        const fileEdit = isFileEditCommand(command);
+        const filename = fileEdit ? extractCommandFilename(command) : "";
+        const exitBadgeClass = exitCode === null || exitCode === undefined
+          ? ""
+          : Number(exitCode) === 0
+            ? "trace-pill-success"
+            : "trace-pill-failure";
+
+        return `
+          <div class="trace-card" data-trace-key="${escapeHtml(traceKey)}">
+            <div style="display:grid;gap:0.8rem;padding:0.95rem;">
+              <div style="display:flex;align-items:flex-start;gap:0.8rem;">
+                <span class="trace-tool-icon ${fileEdit ? "trace-tool-icon-write" : "trace-tool-icon-exec"}">${fileEdit ? "&#9998;" : "$"}</span>
+                <div style="min-width:0;flex:1;display:grid;gap:0.5rem;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+                    <strong>${escapeHtml(title)}</strong>
+                    ${timestamp ? `<span class="small">${escapeHtml(formatDate(timestamp))}</span>` : ""}
+                  </div>
+                  <div style="padding:0.78rem 0.9rem;border-radius:12px;background:rgba(226, 232, 240, 0.14);border:1px solid rgba(148, 163, 184, 0.22);font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;font-size:0.78rem;line-height:1.55;color:#e5e7eb;white-space:pre-wrap;word-break:break-word;">
+                    <span style="color:#94a3b8;">$ </span>${renderHighlightedCommand(command, filename)}
+                  </div>
+                </div>
+              </div>
+              ${exitCode !== null && exitCode !== undefined ? `<div><span class="trace-pill ${exitBadgeClass}">exit ${escapeHtml(String(exitCode))}</span></div>` : ""}
+              ${output
+                ? `
+                  <details class="trace-subsection">
+                    <summary>Output</summary>
+                    <div class="trace-subsection-body">
+                      ${renderPreBlock(output, "trace-command-block")}
+                    </div>
+                  </details>
+                `
+                : ""
+              }
+            </div>
+          </div>
+        `;
+      }
+
+      if (isCodexAgentMessage(trace)) {
+        const text = extractCodexMessageText(getCodexItem(trace)?.content || trace?.content);
+        return `
+          <div class="trace-card" data-trace-key="${escapeHtml(traceKey)}">
+            <div style="display:grid;gap:0.7rem;padding:0.95rem;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+                <strong>${escapeHtml(title)}</strong>
+                ${timestamp ? `<span class="small">${escapeHtml(formatDate(timestamp))}</span>` : ""}
+              </div>
+              <div style="max-width:min(46rem, 92%);padding:0.85rem 1rem;border-radius:16px 16px 16px 6px;background:rgba(191, 219, 254, 0.26);border:1px solid rgba(96, 165, 250, 0.28);color:#dbeafe;white-space:pre-wrap;line-height:1.55;">
+                ${escapeHtml(text || "(empty message)")}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      if (isCodexLifecycleEvent(trace)) {
+        return `
+          <div class="trace-card" data-trace-key="${escapeHtml(traceKey)}">
+            <div style="display:grid;gap:0.65rem;padding:0.95rem;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+                <strong>${escapeHtml(title)}</strong>
+                ${timestamp ? `<span class="small">${escapeHtml(formatDate(timestamp))}</span>` : ""}
+              </div>
+              <div style="display:inline-flex;align-items:center;gap:0.35rem;width:max-content;padding:0.2rem 0.55rem;border-radius:999px;background:rgba(148, 163, 184, 0.12);border:1px solid rgba(148, 163, 184, 0.2);color:#cbd5e1;font-size:0.74rem;">
+                lifecycle event
+              </div>
+              ${renderBlock("Raw event", trace?.raw || trace?.content, { collapsed: true })}
+            </div>
+          </div>
+        `;
+      }
+
       return `
         <details class="trace-card" data-trace-key="${escapeHtml(traceKey)}"${isError || openTraceKeys.has(traceKey) ? " open" : ""}>
           <summary>
@@ -1454,9 +1836,70 @@ async function renderDetail() {
     })
     .join("");
   const nextEventSignature = `${selectedNodeId}:${(selected.trace_events || []).length}:${lifecycleEventRows.length}`;
-  const shouldAutoScroll = state.detailAutoScroll && state.detailEventSignature !== null && state.detailEventSignature !== nextEventSignature;
+  const shouldAutoScroll = activeTab === "trace" && state.detailAutoScroll && state.detailEventSignature !== null && state.detailEventSignature !== nextEventSignature;
+
+  let tabPanelContent = "";
+  if (activeTab === "trace") {
+    tabPanelContent = `
+      <div class="trace-stack">
+        ${traceCards || '<div class="trace-empty">No parsed tool or trace activity yet.</div>'}
+      </div>
+    `;
+  } else if (activeTab === "output") {
+    tabPanelContent = renderDetailPre(selected.output, {
+      emptyMessage: "No node output yet.",
+      background: "#ffffff",
+      color: "#0f172a",
+      borderColor: "rgba(15, 23, 42, 0.14)",
+    });
+  } else {
+    const artifactName = activeTab === "stdout" ? "stdout.log" : "stderr.log";
+    let artifactText = "";
+    let artifactError = "";
+    if (["running", "retrying"].includes(normalizedStatus) && state.runId) {
+      state.artifactCache.delete(`${state.runId}:${selectedNodeId}:${artifactName}`);
+    }
+    try {
+      artifactText = await fetchArtifact(selectedNodeId, artifactName);
+    } catch (error) {
+      artifactError = error?.message || `Unable to load ${artifactName}.`;
+    }
+    if (state.selectedNodeId !== selectedNodeId || state.detailTab !== activeTab) return;
+    tabPanelContent = renderDetailPre(artifactText, {
+      emptyMessage: artifactError || `No ${artifactName} artifact found.`,
+      background: "#ffffff",
+      color: "#0f172a",
+      borderColor: "rgba(15, 23, 42, 0.14)",
+    });
+  }
+
+  const detailTabs = [
+    { id: "output", label: "Output" },
+    { id: "trace", label: "Trace" },
+    { id: "stdout", label: "Stdout" },
+    { id: "stderr", label: "Stderr" },
+  ];
 
   detail.innerHTML = `
+    <div class="trace-item" style="margin-top:0">
+      <div role="tablist" aria-label="Node detail views" style="display:flex;flex-wrap:wrap;gap:0.6rem;margin-bottom:0.9rem">
+        ${detailTabs.map((tab) => {
+          const isActive = tab.id === activeTab;
+          return `
+            <button
+              type="button"
+              role="tab"
+              data-detail-tab="${tab.id}"
+              aria-selected="${isActive ? "true" : "false"}"
+              style="padding:0.5rem 0.9rem;border-radius:999px;border:1px solid ${isActive ? "rgba(56, 189, 248, 0.72)" : "rgba(148, 163, 184, 0.24)"};background:${isActive ? "rgba(56, 189, 248, 0.18)" : "rgba(15, 23, 42, 0.5)"};color:${isActive ? "#e0f2fe" : "var(--muted)"};font-weight:${isActive ? "700" : "600"};cursor:pointer"
+            >${tab.label}</button>
+          `;
+        }).join("")}
+      </div>
+      <div role="tabpanel" aria-label="${escapeHtml(detailTabs.find((tab) => tab.id === activeTab)?.label || "Detail")} panel">
+        ${tabPanelContent}
+      </div>
+    </div>
     <div class="summary-grid">
       <div class="summary-card"><div class="small">Status</div><strong>${escapeHtml(selected.status || "pending")}</strong></div>
       <div class="summary-card"><div class="small">Current attempt</div><strong>${escapeHtml(String(selected.current_attempt || 0))}</strong></div>
@@ -1468,24 +1911,23 @@ async function renderDetail() {
       <div class="summary-grid">${attemptRows || '<div class="small">No attempts yet.</div>'}</div>
     </div>
     <div class="trace-item">
-      <h4>Artifact: ${escapeHtml(selectedArtifact)}</h4>
-      <div class="output-box">${escapeHtml(artifactText)}</div>
-    </div>
-    <div class="trace-item">
       <h4>Success checks</h4>
       <div class="output-box">${escapeHtml((selected.success_details || []).join("\n"))}</div>
-    </div>
-    <div class="trace-item">
-      <h4>Trace Timeline</h4>
-      <div class="trace-stack">
-        ${traceCards || '<div class="trace-empty">No parsed tool or trace activity yet.</div>'}
-      </div>
     </div>
     <div class="trace-item">
       <h4>Lifecycle Events</h4>
       ${lifecycleEvents.map((event) => renderLifecycleEvent(event)).join("") || '<div class="small">No node-specific lifecycle events yet.</div>'}
     </div>
   `;
+
+  detail.querySelectorAll("button[data-detail-tab]").forEach((button) => {
+    button.onclick = async () => {
+      const nextTab = button.dataset.detailTab;
+      if (!nextTab || nextTab === state.detailTab) return;
+      state.detailTab = nextTab;
+      await renderDetail();
+    };
+  });
 
   state.detailEventSignature = nextEventSignature;
   if (shouldAutoScroll) {
@@ -1652,6 +2094,27 @@ function ensureTransientUiStyles() {
   const style = document.createElement("style");
   style.id = "agentflow-transient-ui-styles";
   style.textContent = `
+    .banner {
+      border-color: #e5e7eb;
+      background: #ffffff;
+      color: #1f2937;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+    }
+
+    .banner.connection,
+    .banner.info,
+    .banner.warning {
+      border-color: #f1df7a;
+      background: #fff8c5;
+      color: #3f3a13;
+    }
+
+    .banner.error {
+      border-color: #f1c6c1;
+      background: #ffebe9;
+      color: #7f1d1d;
+    }
+
     .toast-stack {
       position: fixed;
       top: 1rem;
@@ -1668,9 +2131,11 @@ function ensureTransientUiStyles() {
       max-width: 360px;
       padding: 0.9rem 1rem;
       border-radius: 12px;
-      border: 1px solid transparent;
-      box-shadow: 0 14px 40px rgba(15, 23, 42, 0.22);
-      color: #0f172a;
+      border: 1px solid #e5e7eb;
+      border-left: 4px solid var(--toast-accent, #94a3b8);
+      background: #ffffff;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+      color: #1f2937;
       font-weight: 600;
       line-height: 1.4;
       pointer-events: auto;
@@ -1678,36 +2143,79 @@ function ensureTransientUiStyles() {
     }
 
     .toast.info {
-      background: #dbeafe;
-      border-color: #60a5fa;
+      --toast-accent: #3b82f6;
     }
 
     .toast.success {
-      background: #dcfce7;
-      border-color: #4ade80;
+      --toast-accent: #22c55e;
     }
 
     .toast.error {
-      background: #fee2e2;
-      border-color: #f87171;
+      --toast-accent: #ef4444;
     }
 
     .toast.warning {
-      background: #fef3c7;
-      border-color: #fbbf24;
+      --toast-accent: #f59e0b;
     }
 
     .skeleton-stack {
       display: grid;
       gap: 0.75rem;
+      padding: 0.25rem 0;
+      background: #ffffff;
     }
 
     .skeleton-bar {
       height: 16px;
       border-radius: 999px;
-      background: linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(148, 163, 184, 0.38), rgba(148, 163, 184, 0.18));
-      background-size: 200% 100%;
+      background: #f0f0f0;
       animation: agentflow-skeleton-pulse 1.2s ease-in-out infinite;
+    }
+
+    .empty-state {
+      width: 100%;
+      min-height: 104px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+      padding: 1.25rem;
+      border: 1px dashed #e5e7eb;
+      border-radius: 16px;
+      background: #ffffff;
+      color: #8a8f98;
+      text-align: center;
+      grid-column: 1 / -1;
+    }
+
+    .empty-state-icon {
+      position: relative;
+      width: 2rem;
+      height: 2rem;
+      border: 1px solid #d7dbe0;
+      border-radius: 999px;
+      background: #fafafa;
+      flex: 0 0 auto;
+    }
+
+    .empty-state-icon::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0.9rem;
+      height: 1.5px;
+      border-radius: 999px;
+      background: #b7bcc5;
+      transform: translate(-50%, -50%);
+    }
+
+    .empty-state-text {
+      max-width: 28ch;
+      color: #8a8f98;
+      font-size: 0.82rem;
+      line-height: 1.5;
     }
 
     @keyframes agentflow-toast-in {
@@ -1722,11 +2230,12 @@ function ensureTransientUiStyles() {
     }
 
     @keyframes agentflow-skeleton-pulse {
-      0% {
-        background-position: 200% 0;
-      }
+      0%,
       100% {
-        background-position: -200% 0;
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.55;
       }
     }
   `;
@@ -1766,6 +2275,8 @@ function showSkeleton(elementId) {
     </div>
   `;
 }
+
+ensureTransientUiStyles();
 
 for (const button of document.querySelectorAll(".artifact-button")) {
   button.onclick = async () => {
