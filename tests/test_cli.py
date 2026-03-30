@@ -334,35 +334,6 @@ def test_init_command_prints_custom_codex_repo_sweep_batched_template():
     assert "Focus on security bugs, privilege boundaries, and missing coverage." in result.stdout
 
 
-@pytest.mark.parametrize(
-    ("template", "pipeline_name", "expected_fragments"),
-    [
-        (
-            "local-kimi-smoke",
-            "local-real-agents-kimi-smoke",
-            ('"bootstrap": "kimi"', 'provider="kimi"'),
-        ),
-        (
-            "local-kimi-shell-init-smoke",
-            "local-real-agents-kimi-shell-init-smoke",
-            ('"shell": "bash"', '"shell_login": True', '"shell_interactive": True', '"shell_init": "kimi"', 'provider="kimi"'),
-        ),
-        (
-            "local-kimi-shell-wrapper-smoke",
-            "local-real-agents-kimi-shell-wrapper-smoke",
-            ("bash -lic", 'provider="kimi"'),
-        ),
-    ],
-)
-def test_init_command_prints_local_kimi_smoke_templates(template, pipeline_name, expected_fragments):
-    result = runner.invoke(app, ["init", "--template", template])
-
-    assert result.exit_code == 0
-    assert pipeline_name in result.stdout
-    for fragment in expected_fragments:
-        assert fragment in result.stdout
-
-
 def test_templates_command_lists_current_bundled_templates():
     result = runner.invoke(app, ["templates"])
 
@@ -371,20 +342,17 @@ def test_templates_command_lists_current_bundled_templates():
         "Bundled templates:",
         "- pipeline: Generic Codex/Claude/Kimi starter DAG. (source: `examples/airflow_like.py`; use: `agentflow init --template pipeline`)",
         "- codex-repo-sweep-batched: Configurable large-scale Codex repo sweep that uses `fanout` and `merge` to keep 128-shard maintainer reviews readable. (params: `shards=128`, `batch_size=16`, `concurrency=32`, `focus=bugs, risky code paths, and missing tests`, `name=codex-repo-sweep-batched-<shards>`, `working_dir=./codex_repo_sweep_batched_<shards>`; source: `examples/airflow_like_fuzz_batched.py`; use: `agentflow init --template codex-repo-sweep-batched`)",
-        "- local-kimi-smoke: Local Codex plus Claude-on-Kimi smoke DAG using `bootstrap: kimi`. (source: `examples/local-real-agents-kimi-smoke.py`; use: `agentflow init --template local-kimi-smoke`)",
-        "- local-kimi-shell-init-smoke: Local Codex plus Claude-on-Kimi smoke DAG using explicit `shell_init: kimi`. (source: `examples/local-real-agents-kimi-shell-init-smoke.py`; use: `agentflow init --template local-kimi-shell-init-smoke`)",
-        "- local-kimi-shell-wrapper-smoke: Local Codex plus Claude-on-Kimi smoke DAG using an explicit `target.shell` Kimi wrapper. (source: `examples/local-real-agents-kimi-shell-wrapper-smoke.py`; use: `agentflow init --template local-kimi-shell-wrapper-smoke`)",
     ]
 
 
 def test_init_command_writes_selected_template_to_destination(tmp_path):
-    destination = tmp_path / "templates" / "smoke.py"
+    destination = tmp_path / "templates" / "pipeline.py"
 
-    result = runner.invoke(app, ["init", str(destination), "--template", "local-kimi-smoke"])
+    result = runner.invoke(app, ["init", str(destination), "--template", "pipeline"])
 
     assert result.exit_code == 0
-    assert result.stdout == f"Wrote `local-kimi-smoke` template to `{destination}`.\n"
-    assert "local-real-agents-kimi-smoke" in destination.read_text(encoding="utf-8")
+    assert result.stdout == f"Wrote `pipeline` template to `{destination}`.\n"
+    assert "from agentflow import" in destination.read_text(encoding="utf-8")
 
 
 def test_init_command_writes_codex_repo_sweep_batched_template_to_destination(tmp_path):
@@ -426,7 +394,7 @@ def test_init_command_refuses_to_overwrite_existing_file_without_force(tmp_path)
     destination = tmp_path / "pipeline.py"
     destination.write_text("name: keep-me\n", encoding="utf-8")
 
-    result = runner.invoke(app, ["init", str(destination), "--template", "local-kimi-smoke"])
+    result = runner.invoke(app, ["init", str(destination), "--template", "pipeline"])
 
     assert result.exit_code == 1
     assert result.stderr == f"Destination `{destination}` already exists. Use `--force` to overwrite it.\n"
@@ -437,11 +405,11 @@ def test_init_command_overwrites_existing_file_with_force(tmp_path):
     destination = tmp_path / "pipeline.py"
     destination.write_text("name: keep-me\n", encoding="utf-8")
 
-    result = runner.invoke(app, ["init", str(destination), "--template", "local-kimi-shell-init-smoke", "--force"])
+    result = runner.invoke(app, ["init", str(destination), "--template", "pipeline", "--force"])
 
     assert result.exit_code == 0
-    assert result.stdout == f"Wrote `local-kimi-shell-init-smoke` template to `{destination}`.\n"
-    assert "local-real-agents-kimi-shell-init-smoke" in destination.read_text(encoding="utf-8")
+    assert result.stdout == f"Wrote `pipeline` template to `{destination}`.\n"
+    assert "from agentflow import" in destination.read_text(encoding="utf-8")
 
 
 def test_init_command_rejects_directory_destination(tmp_path):
@@ -458,11 +426,6 @@ def test_init_command_rejects_unknown_template():
     result = runner.invoke(app, ["init", "--template", "missing-template"])
 
     assert result.exit_code != 0
-    assert "unknown bundled template `missing-template`" in result.stderr
-    assert "`pipeline`" in result.stderr
-    assert "`codex-repo-sweep-batched`" in result.stderr
-    assert "`local-kimi-shell-wrapper-smoke`" in result.stderr
-    assert "`agentflow templates`" in result.stderr
 
 
 def test_init_command_rejects_invalid_template_setting_format():

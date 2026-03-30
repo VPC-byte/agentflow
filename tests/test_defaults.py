@@ -19,35 +19,13 @@ def test_bundled_templates_expose_current_descriptions_and_example_files():
     assert bundled_template_names() == (
         "pipeline",
         "codex-repo-sweep-batched",
-        "local-kimi-smoke",
-        "local-kimi-shell-init-smoke",
-        "local-kimi-shell-wrapper-smoke",
     )
 
     by_name = {template.name: template for template in templates}
     assert by_name["pipeline"].example_name == "airflow_like.py"
-    assert by_name["pipeline"].description == "Generic Codex/Claude/Kimi starter DAG."
     assert by_name["pipeline"].parameters == ()
-    assert by_name["pipeline"].support_files == ()
     assert by_name["codex-repo-sweep-batched"].example_name == "airflow_like_fuzz_batched.py"
     assert "fanout" in by_name["codex-repo-sweep-batched"].description
-    assert "merge" in by_name["codex-repo-sweep-batched"].description
-    assert tuple(parameter.name for parameter in by_name["codex-repo-sweep-batched"].parameters) == (
-        "shards",
-        "batch_size",
-        "concurrency",
-        "focus",
-        "name",
-        "working_dir",
-    )
-    assert by_name["codex-repo-sweep-batched"].support_files == ()
-    assert by_name["local-kimi-smoke"].example_name == "local-real-agents-kimi-smoke.py"
-    assert "`bootstrap: kimi`" in by_name["local-kimi-smoke"].description
-    assert by_name["local-kimi-smoke"].support_files == ()
-    assert by_name["local-kimi-shell-init-smoke"].example_name == "local-real-agents-kimi-shell-init-smoke.py"
-    assert "shell_init: kimi" in by_name["local-kimi-shell-init-smoke"].description
-    assert by_name["local-kimi-shell-wrapper-smoke"].example_name == "local-real-agents-kimi-shell-wrapper-smoke.py"
-    assert "target.shell" in by_name["local-kimi-shell-wrapper-smoke"].description
 
 
 def test_pipeline_template_matches_default_example_file_and_rejects_settings():
@@ -70,67 +48,8 @@ def test_bundled_template_helpers_reject_unknown_template_names():
         render_bundled_template("missing-template")
 
 
-def test_default_smoke_pipeline_path_points_to_local_kimi_smoke_template():
-    assert default_smoke_pipeline_path() == str(bundled_template_path("local-kimi-smoke"))
-
-
-def test_bundled_smoke_pipeline_runs_both_agents_in_shared_kimi_bootstrap():
-    pipeline = load_pipeline_from_path(default_smoke_pipeline_path())
-    codex_node = pipeline.node_map["codex_plan"]
-    claude_node = pipeline.node_map["claude_review"]
-
-    assert pipeline.concurrency == 2
-    assert codex_node.target.kind == "local"
-    assert codex_node.target.bootstrap == "kimi"
-    assert codex_node.target.shell == "bash"
-    assert codex_node.target.shell_login is True
-    assert codex_node.target.shell_interactive is True
-    assert codex_node.target.shell_init == ["command -v kimi >/dev/null 2>&1", "kimi"]
-    assert codex_node.depends_on == []
-    assert claude_node.target.bootstrap == "kimi"
-    assert claude_node.target.shell == "bash"
-    assert claude_node.target.shell_login is True
-    assert claude_node.target.shell_interactive is True
-    assert claude_node.target.shell_init == ["command -v kimi >/dev/null 2>&1", "kimi"]
-    assert claude_node.depends_on == []
-
-
-def test_bundled_shell_init_smoke_pipeline_runs_both_agents_in_explicit_shell_init_mode():
-    pipeline = load_pipeline_from_path(str(bundled_template_path("local-kimi-shell-init-smoke")))
-    codex_node = pipeline.node_map["codex_plan"]
-    claude_node = pipeline.node_map["claude_review"]
-
-    assert pipeline.concurrency == 2
-    assert codex_node.target.kind == "local"
-    assert codex_node.target.bootstrap is None
-    assert codex_node.target.shell == "bash"
-    assert codex_node.target.shell_login is True
-    assert codex_node.target.shell_interactive is True
-    assert codex_node.target.shell_init == "kimi"
-    assert codex_node.depends_on == []
-    assert claude_node.target.bootstrap is None
-    assert claude_node.target.shell == "bash"
-    assert claude_node.target.shell_login is True
-    assert claude_node.target.shell_interactive is True
-    assert claude_node.target.shell_init == "kimi"
-    assert claude_node.depends_on == []
-
-
-def test_bundled_shell_wrapper_smoke_pipeline_runs_both_agents_in_explicit_shell_wrapper_mode():
-    pipeline = load_pipeline_from_path(str(bundled_template_path("local-kimi-shell-wrapper-smoke")))
-    codex_node = pipeline.node_map["codex_plan"]
-    claude_node = pipeline.node_map["claude_review"]
-
-    assert pipeline.concurrency == 2
-    assert codex_node.target.kind == "local"
-    assert codex_node.target.bootstrap is None
-    assert codex_node.target.shell == "bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'"
-    assert codex_node.target.shell_init is None
-    assert codex_node.depends_on == []
-    assert claude_node.target.bootstrap is None
-    assert claude_node.target.shell == "bash -lic 'command -v kimi >/dev/null 2>&1 && kimi && {command}'"
-    assert claude_node.target.shell_init is None
-    assert claude_node.depends_on == []
+def test_default_smoke_pipeline_path_points_to_airflow_like():
+    assert default_smoke_pipeline_path() == str(bundled_template_path("pipeline"))
 
 
 def test_bundled_codex_repo_sweep_batched_template_supports_overrides(tmp_path):

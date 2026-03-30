@@ -306,21 +306,6 @@ _BUNDLED_TEMPLATES = (
             ),
         ),
     ),
-    BundledTemplate(
-        name="local-kimi-smoke",
-        example_name="local-real-agents-kimi-smoke.py",
-        description="Local Codex plus Claude-on-Kimi smoke DAG using `bootstrap: kimi`.",
-    ),
-    BundledTemplate(
-        name="local-kimi-shell-init-smoke",
-        example_name="local-real-agents-kimi-shell-init-smoke.py",
-        description="Local Codex plus Claude-on-Kimi smoke DAG using explicit `shell_init: kimi`.",
-    ),
-    BundledTemplate(
-        name="local-kimi-shell-wrapper-smoke",
-        example_name="local-real-agents-kimi-shell-wrapper-smoke.py",
-        description="Local Codex plus Claude-on-Kimi smoke DAG using an explicit `target.shell` Kimi wrapper.",
-    ),
 )
 
 _BUNDLED_TEMPLATE_FILES = {template.name: template.example_name for template in _BUNDLED_TEMPLATES}
@@ -399,4 +384,4 @@ def load_bundled_template(name: str, values: Mapping[str, str] | None = None) ->
 
 
 def default_smoke_pipeline_path() -> str:
-    return str(bundled_example_path("local-real-agents-kimi-smoke.py"))
+    return str(bundled_example_path("airflow_like.py"))
