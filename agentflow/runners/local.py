@@ -320,8 +320,14 @@ class LocalRunner(Runner):
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if stream_gather in done or wait_task in done:
+                    # Process exited — drain streams with a short timeout.
+                    # Pipes can stay open after process death (inherited by
+                    # child processes), so we must not block forever.
                     if not stream_gather.done():
-                        await stream_gather
+                        try:
+                            await asyncio.wait_for(asyncio.shield(stream_gather), timeout=5)
+                        except asyncio.TimeoutError:
+                            pass  # streams stuck — proceed without them
                     if not wait_task.done():
                         await wait_task
                     break
