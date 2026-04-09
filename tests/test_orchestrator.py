@@ -48,6 +48,8 @@ if node_id == "flaky_silent":
         print("stale stdout from failed attempt")
         raise SystemExit(3)
     raise SystemExit(0)
+if node_id == "fail_always":
+    raise SystemExit(3)
 if node_id == "writer":
     (workdir / "artifact.txt").write_text("file data", encoding="utf-8")
 if agent == "codex":
@@ -1284,3 +1286,54 @@ print(json.dumps({
     assert all("Under-development features enabled:" not in line for line in node.stdout_lines)
     assert node.output is not None and "Under-development features enabled:" not in node.output
     assert "Under-development features enabled:" in stdout_log
+
+
+@pytest.mark.asyncio
+async def test_cycle_tail_success_does_not_block_downstream_skip(tmp_path: Path):
+    """Regression: once a cycle tail succeeds, downstream nodes that also
+    depend on a *separate* failed node must be skipped normally — not held
+    pending forever.
+
+    Pipeline:
+        cycle_target -> cycle_tail (on_failure_restart -> cycle_target)
+        fail_always  (independent, always fails)
+        downstream   (depends_on: [cycle_tail, fail_always])
+
+    cycle_tail fails on first iteration (triggering restart), then succeeds
+    on iteration 2.  fail_always always fails.  downstream should be SKIPPED
+    because fail_always failed — not stuck PENDING because the cycle tail
+    was once active.
+    """
+    orchestrator = make_orchestrator(tmp_path)
+    pipeline = PipelineSpec.model_validate(
+        {
+            "name": "cycle-tail-success-skip",
+            "working_dir": str(tmp_path),
+            "max_iterations": 5,
+            "nodes": [
+                {"id": "cycle_target", "agent": "codex", "prompt": "target"},
+                {
+                    "id": "flaky",
+                    "agent": "codex",
+                    "prompt": "tail",
+                    "depends_on": ["cycle_target"],
+                    "on_failure_restart": ["cycle_target"],
+                },
+                {"id": "fail_always", "agent": "codex", "prompt": "doomed"},
+                {
+                    "id": "downstream",
+                    "agent": "codex",
+                    "prompt": "should be skipped",
+                    "depends_on": ["flaky", "fail_always"],
+                },
+            ],
+        }
+    )
+
+    run = await orchestrator.submit(pipeline)
+    completed = await orchestrator.wait(run.id, timeout=10)
+
+    assert completed.nodes["flaky"].status.value == "completed"
+    assert completed.nodes["fail_always"].status.value == "failed"
+    assert completed.nodes["downstream"].status.value == "skipped"
+    assert completed.status.value in {"completed", "failed"}

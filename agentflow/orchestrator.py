@@ -515,6 +515,9 @@ class Orchestrator:
                         fanout_group=node.fanout_group, fanout_member=node.fanout_member,
                         on_failure_restart=node.on_failure_restart,
                         fanout_dependencies=getattr(node, 'fanout_dependencies', {}),
+                        executable=node.executable,
+                        description=node.description,
+                        repo_instructions_mode=node.repo_instructions_mode,
                     )
                 except Exception as exc:
                     await self._publish(run_id, "node_trace", node_id=node_id,
@@ -826,15 +829,36 @@ class Orchestrator:
 
             # Collect nodes involved in cycles (both targets and tail nodes)
             cycle_nodes: set[str] = set()
+            cycle_tail_nodes: set[str] = set()
             for n in pipeline.nodes:
                 if n.on_failure_restart:
-                    cycle_nodes.add(n.id)  # tail node (has the back-edge)
+                    cycle_tail_nodes.add(n.id)  # tail node (has the back-edge)
+                    cycle_nodes.add(n.id)
                     cycle_nodes.update(n.on_failure_restart)  # restart targets
+            # Nodes that depend on a cycle tail should not be eagerly
+            # skipped — the tail may succeed on a future iteration.
+            # But once the cycle is exhausted, allow normal blocking.
+            active_cycle_tails: set[str] = set()
+            for tail_id in cycle_tail_nodes:
+                iter_key = (run_id, tail_id)
+                tail_status = record.nodes[tail_id].status
+                # A tail is only active if it hasn't succeeded yet AND
+                # still has iterations remaining.
+                if (
+                    tail_status != NodeStatus.COMPLETED
+                    and iteration_counts.get(iter_key, 0) < pipeline.max_iterations
+                ):
+                    active_cycle_tails.add(tail_id)
+            cycle_downstream: set[str] = set()
+            for n in pipeline.nodes:
+                if any(dep in active_cycle_tails for dep in n.depends_on):
+                    cycle_downstream.add(n.id)
 
             blocked = [
                 node_id
                 for node_id in list(remaining)
                 if node_id not in cycle_nodes  # don't skip any node in a cycle
+                and node_id not in cycle_downstream  # don't skip nodes waiting on cycle outcome
                 and any(record.nodes[dependency].status in {NodeStatus.FAILED, NodeStatus.SKIPPED, NodeStatus.CANCELLED} for dependency in node_map[node_id].depends_on)
             ]
             for node_id in blocked:
@@ -975,6 +999,16 @@ class Orchestrator:
                                 # Also reset nodes between target and this node
                                 for mid_id in self._nodes_between(node_map, target_id, node_id):
                                     self._reset_node_for_cycle(record, mid_id, remaining)
+                            # Reset any nodes that were SKIPPED due to this cycle
+                            # node failing — they should get a chance to run once
+                            # the cycle eventually succeeds.
+                            for dep_node in pipeline.nodes:
+                                if (
+                                    node_id in dep_node.depends_on
+                                    and record.nodes.get(dep_node.id)
+                                    and record.nodes[dep_node.id].status == NodeStatus.SKIPPED
+                                ):
+                                    self._reset_node_for_cycle(record, dep_node.id, remaining)
                             await self.store.persist_run(run_id)
                         else:
                             await self._publish(
