@@ -5,7 +5,7 @@ Orchestrate codex, claude, and kimi agents in dependency graphs with parallel fa
 ![AgentFlow Graph](docs/graph.png)
 *94-node pipeline: plan → 64 workers → 8 batch merges → 16 reviews → 4 review merges → synthesis*
 
-## Install
+## Install / Upgrade
 
 One line:
 
