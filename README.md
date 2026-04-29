@@ -46,6 +46,24 @@ Or just ask Codex (the agentflow skill is auto-installed):
 codex "Use agentflow to fan out 10 codex agents, each telling a unique joke, then merge their outputs and pick the funniest one. Write the pipeline and run it."
 ```
 
+## Chromium + Kimi Campaign Notes
+
+This fork includes research notes for reproducing the public AgentFlow + Kimi
+K2.5 browser-vulnerability workflow discussed by Chaofan Shou (`@Fried_rice`)
+on X on 2026-04-23.
+
+- Rewritten prompt template: [`prompts/chromium-agentflow-kimi-chaofan-inspired.md`](prompts/chromium-agentflow-kimi-chaofan-inspired.md)
+- Tikhub scrape summary for 2026-04-22 through 2026-04-29 UTC: [`research/chaofan-x-apr22-apr29-2026.md`](research/chaofan-x-apr22-apr29-2026.md)
+- Main X thread: https://x.com/Fried_rice/status/2047183251308175726
+- Prompt-focused reply: https://x.com/Fried_rice/status/2047183257675202560
+- Paper: https://arxiv.org/abs/2604.20801
+
+The included prompt is an original reconstruction, not a verbatim republication
+of the long X prompt. It preserves the operational structure needed for an
+authorized Chromium campaign: sanitizer-backed crash criteria, external
+Chromium launch with CDP, shard isolation, shared crash deduplication, rerun
+requirements, and reproducible artifact logging.
+
 ## Parallel Fanout
 
 Fan a node into many parallel copies with `fanout()`:
