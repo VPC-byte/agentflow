@@ -50,6 +50,52 @@ def test_api_returns_default_example_payload(tmp_path):
     assert response.json()["base_dir"] == os.getcwd()
 
 
+def test_web_index_renders(tmp_path):
+    orchestrator = make_orchestrator(tmp_path)
+    app = create_app(store=orchestrator.store, orchestrator=orchestrator)
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "AgentFlow" in response.text
+
+
+def test_web_auth_token_requires_basic_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTFLOW_AUTH_TOKEN", "panel-secret")
+    orchestrator = make_orchestrator(tmp_path)
+    app = create_app(store=orchestrator.store, orchestrator=orchestrator)
+    client = TestClient(app)
+
+    response = client.get("/")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == 'Basic realm="AgentFlow"'
+
+
+def test_web_auth_token_accepts_matching_basic_password(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTFLOW_AUTH_TOKEN", "panel-secret")
+    orchestrator = make_orchestrator(tmp_path)
+    app = create_app(store=orchestrator.store, orchestrator=orchestrator)
+    client = TestClient(app)
+
+    response = client.get("/", auth=("agentflow", "panel-secret"))
+
+    assert response.status_code == 200
+    assert "AgentFlow" in response.text
+
+
+def test_web_auth_token_rejects_wrong_basic_password(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTFLOW_AUTH_TOKEN", "panel-secret")
+    orchestrator = make_orchestrator(tmp_path)
+    app = create_app(store=orchestrator.store, orchestrator=orchestrator)
+    client = TestClient(app)
+
+    response = client.get("/api/health", auth=("agentflow", "wrong"))
+
+    assert response.status_code == 401
+
+
 def test_api_supports_validation_and_artifacts(tmp_path):
     orchestrator = make_orchestrator(tmp_path)
     app = create_app(store=orchestrator.store, orchestrator=orchestrator)

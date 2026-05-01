@@ -24,6 +24,8 @@ class SSHRunner(Runner):
     The target spec provides host, port, username, and optional identity file.
     """
 
+    _STREAM_LIMIT_BYTES = 32 * 1024 * 1024
+
     def _build_ssh_command(
         self,
         node: NodeSpec,
@@ -80,6 +82,7 @@ class SSHRunner(Runner):
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.PIPE if prepared.stdin else asyncio.subprocess.DEVNULL,
             cwd=str(paths.host_workdir),
+            limit=self._STREAM_LIMIT_BYTES,
         )
 
         stdout_lines: list[str] = []

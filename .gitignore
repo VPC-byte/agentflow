@@ -12,3 +12,7 @@ dist/
 *.egg-info/
 .worktrees/
 docs/superpowers/
+runs/*
+!runs/chromium-transition/
+runs/chromium-transition/*
+!runs/chromium-transition/watch_and_run_two_workers.sh

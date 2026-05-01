@@ -121,6 +121,9 @@ def collect_local_credentials(agent: str) -> dict[str, str]:
     """
     env: dict[str, str] = {}
 
+    if agent in ("codex", "claude", "all") and os.environ.get("OPENROUTER_API_KEY"):
+        env["OPENROUTER_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+
     if agent in ("codex", "all"):
         # ~/.codex/auth.json
         auth_path = Path.home() / ".codex" / "auth.json"
@@ -163,6 +166,10 @@ def collect_local_credentials(agent: str) -> dict[str, str]:
                 pass
         if os.environ.get("ANTHROPIC_API_KEY"):
             env.setdefault("ANTHROPIC_API_KEY", os.environ["ANTHROPIC_API_KEY"])
+        if os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            env.setdefault("ANTHROPIC_AUTH_TOKEN", os.environ["ANTHROPIC_AUTH_TOKEN"])
+        if "ANTHROPIC_API_KEY" in os.environ and os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            env["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
         if os.environ.get("ANTHROPIC_BASE_URL"):
             env.setdefault("ANTHROPIC_BASE_URL", os.environ["ANTHROPIC_BASE_URL"])
 

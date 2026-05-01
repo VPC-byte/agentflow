@@ -11,6 +11,7 @@ import pytest
 from agentflow.prepared import ExecutionPaths, PreparedExecution
 from agentflow.runners.container import ContainerRunner
 from agentflow.runners.local import LocalRunner
+from agentflow.runners.ssh import SSHRunner
 from agentflow.specs import LocalTarget, NodeSpec, PipelineSpec
 
 
@@ -726,6 +727,47 @@ asyncio.run(main())
     assert payload["stdout_lines"] == ["child-start", "child-done"]
     assert payload["timed_out"] is False
     assert payload["stderr_lines"] == []
+
+
+@pytest.mark.asyncio
+async def test_ssh_runner_handles_large_json_stdout_lines(tmp_path: Path, monkeypatch):
+    node = NodeSpec.model_validate(
+        {
+            "id": "ssh-large-line",
+            "agent": "codex",
+            "prompt": "hi",
+            "target": {"kind": "ssh", "host": "example.test", "username": "ubuntu"},
+        }
+    )
+    large_line = json.dumps({"type": "item.completed", "payload": "x" * 100_000})
+    prepared = PreparedExecution(
+        command=["unused"],
+        env={},
+        cwd=str(tmp_path),
+        trace_kind="codex",
+    )
+    seen: list[tuple[str, str]] = []
+
+    def fake_ssh_command(self, node, prepared, paths):
+        return ["python3", "-c", f"print({large_line!r})"]
+
+    async def collect_output(stream_name: str, text: str) -> None:
+        seen.append((stream_name, text))
+
+    monkeypatch.setattr(SSHRunner, "_build_ssh_command", fake_ssh_command)
+
+    result = await SSHRunner().execute(
+        node,
+        prepared,
+        _paths(tmp_path),
+        collect_output,
+        lambda: False,
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout_lines == [large_line]
+    assert result.stderr_lines == []
+    assert seen == [("stdout", large_line)]
 
 
 def test_local_runner_plan_execution_includes_shell_wrapper(tmp_path: Path):

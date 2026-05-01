@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
+import secrets
 import subprocess
 import sys
 from functools import lru_cache
@@ -22,6 +24,7 @@ from agentflow.store import RunStore
 
 
 _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
+_AUTH_CHALLENGE = 'Basic realm="AgentFlow"'
 
 
 def _api_pipeline_path_enabled() -> bool:
@@ -32,6 +35,21 @@ def _require_json_request(request: Request) -> None:
     content_type = request.headers.get("content-type", "")
     if "application/json" not in content_type.lower():
         raise HTTPException(status_code=415, detail="application/json content type required")
+
+
+def _request_has_valid_basic_auth(request: Request, token: str) -> bool:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, credentials = authorization.partition(" ")
+    if scheme.lower() != "basic" or not credentials:
+        return False
+    try:
+        decoded = base64.b64decode(credentials, validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    _, separator, password = decoded.partition(":")
+    if not separator:
+        return False
+    return secrets.compare_digest(password, token)
 
 
 @lru_cache(maxsize=1)
@@ -94,6 +112,17 @@ def create_app(*, store: RunStore | None = None, orchestrator: Orchestrator | No
     app = FastAPI(title="AgentFlow", version="0.1.0")
     app.state.store = store
     app.state.orchestrator = orchestrator
+    auth_token = os.getenv("AGENTFLOW_AUTH_TOKEN", "").strip()
+
+    @app.middleware("http")
+    async def require_basic_auth(request: Request, call_next):
+        if not auth_token or _request_has_valid_basic_auth(request, auth_token):
+            return await call_next(request)
+        return PlainTextResponse(
+            "authentication required",
+            status_code=401,
+            headers={"WWW-Authenticate": _AUTH_CHALLENGE},
+        )
 
     base_dir = os.path.join(os.path.dirname(__file__), "web")
     templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
@@ -102,8 +131,9 @@ def create_app(*, store: RunStore | None = None, orchestrator: Orchestrator | No
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
+            request,
             "index.html",
-            {"request": request, "example": _load_default_web_example(), "base_dir": os.getcwd()},
+            {"example": _load_default_web_example(), "base_dir": os.getcwd()},
         )
 
     @app.get("/api/examples/default")
