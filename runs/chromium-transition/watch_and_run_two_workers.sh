@@ -117,7 +117,11 @@ for line in original.splitlines():
     if len(columns) < 4:
         kept.append(line)
         continue
+    evidence = columns[2]
     artifact = columns[3]
+    if evidence.startswith('No crashes found') or not artifact.startswith('crashes/'):
+        removed.append(line)
+        continue
     artifact_path = Path(artifact)
     if not artifact_path.is_absolute():
         artifact_path = root / artifact_path
@@ -134,7 +138,7 @@ backup = root / f'crashes/README.md.bak.{timestamp}'
 backup.write_text(original, encoding='utf-8')
 readme.write_text('\n'.join(kept).rstrip() + '\n', encoding='utf-8')
 for line in removed:
-    print(f'missing crash artifact: {line}')
+    print(f'non-crash registry row or missing crash artifact: {line}')
 print(f'crash registry backup: {backup}')
 PY" >> "$HEALTH_LOG" 2>&1 || true
 }

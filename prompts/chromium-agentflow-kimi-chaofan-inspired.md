@@ -48,6 +48,7 @@ Step 4: DOCUMENT COMPONENT - If no crash, write findings to docs/<short_name>.md
    flock -x locks/docs.lock -c 'cat <<EOF > docs/blink_layout_lessons.md
    [detailed findings]
    EOF'
+   Do NOT append no-crash, exhausted-component, or negative audit notes to crashes/README.md. crashes/README.md is only for TRUE crash records with sanitizer evidence and reproducible artifacts.
 Step 5: LOG GENERAL LESSONS - Append reusable Chromium/Playwright execution lessons to docs/global_lessons.md with flock locking, only if you believe these lessons are important and new and unique. 
 Step 6: PICK NEW TARGET - Return to Step 1.
 

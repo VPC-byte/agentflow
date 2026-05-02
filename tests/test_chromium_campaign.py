@@ -35,3 +35,10 @@ def test_chromium_shards_balance_across_workers(monkeypatch) -> None:
         "secondary.example": 12,
     }
     assert len({shard["workspace"] for shard in shards}) == 24
+
+
+def test_chromium_prompt_keeps_negative_notes_out_of_crash_registry() -> None:
+    prompt = campaign.PROMPT_PATH.read_text(encoding="utf-8")
+
+    assert "Do NOT append no-crash" in prompt
+    assert "crashes/README.md is only for TRUE crash records" in prompt

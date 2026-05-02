@@ -61,3 +61,11 @@ def test_chromium_watcher_prunes_crash_registry_rows_without_artifacts() -> None
     assert "remote_sanitize_crash_registry()" in script
     assert "missing crash artifact" in script
     assert "crashes/README.md.bak" in script
+
+
+def test_chromium_watcher_prunes_non_crash_registry_rows() -> None:
+    script = WATCHER.read_text(encoding="utf-8")
+
+    assert "non-crash registry row" in script
+    assert "not artifact.startswith('crashes/')" in script
+    assert "No crashes found" in script
